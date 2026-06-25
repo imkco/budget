@@ -52,6 +52,15 @@
   .seg button.on.inc{background:var(--teal);color:#fff}
   .seg button.on.mov{background:var(--ink);color:#fff}
   .seg.seg4 button{font-size:13px;padding:8px 4px}
+  .seg.seg-sm{margin-bottom:0}
+  .seg.seg-sm button{padding:7px 4px;font-size:12px}
+  .seg.seg-sm button.on{background:var(--ink);color:#fff}
+  .chartctl{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .chartctl .seg{flex:1;min-width:180px}
+  .periodnav{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:16px}
+  .periodnav button{border:1px solid var(--rule);background:#fff;width:32px;height:32px;border-radius:8px;font-size:17px;cursor:pointer;color:var(--ink)}
+  .periodnav button:hover{background:var(--ink);color:#fff}
+  .periodnav #clabel{font-size:14px;font-weight:700;min-width:150px;text-align:center}
   .tx .dot.mov{background:var(--ink)!important}
   label.fld{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:12px 0 5px}
   input,select{width:100%;padding:10px 12px;border:1px solid var(--rule);border-radius:9px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
@@ -215,7 +224,6 @@
         <button class="on exp" data-t="expense">지출</button>
         <button data-t="income">수입</button>
         <button data-t="transfer">이체</button>
-        <button data-t="cardpay">카드대금</button>
       </div>
       <label class="fld">금액</label>
       <input type="number" id="amt" placeholder="0" inputmode="numeric">
@@ -299,20 +307,38 @@
               <option value="credit">신용카드</option>
             </select>
           </div>
-          <div class="setrow" style="margin-top:8px">
-            <select id="newCardLink"></select>
-          </div>
-          <div class="setrow" id="newCardPayRow" style="margin-top:8px;display:none">
+          <label class="fld" id="newCardLinkLabel" style="margin-top:10px">차감 통장</label>
+          <select id="newCardLink"></select>
+          <div id="newCardPayRow" style="display:none">
+            <label class="fld" style="margin-top:10px">연결계좌 <span style="font-weight:400;color:var(--muted)">— 대금 출금계좌 (선택)</span></label>
             <select id="newCardPayAcct"></select>
           </div>
-          <div class="setrow" style="margin-top:8px">
+          <div class="setrow" style="margin-top:12px">
             <button id="cardAdd" style="flex:1">카드 추가</button>
           </div>
         </div>
       </div>
 
       <div class="panel" id="tab-chart" style="display:none">
-        <h2>분류별 지출</h2>
+        <h2>분류별 집계 <span class="mini" id="chartTypeToggle">지출 ↔ 수입</span></h2>
+        <div class="chartctl">
+          <div class="seg seg-sm" id="chartLevel">
+            <button class="on" data-lv="0">대분류</button>
+            <button data-lv="1">중분류</button>
+            <button data-lv="2">소분류</button>
+          </div>
+          <div class="seg seg-sm" id="chartPeriod">
+            <button data-pd="day">일간</button>
+            <button data-pd="week">주간</button>
+            <button class="on" data-pd="month">월간</button>
+            <button data-pd="year">연간</button>
+          </div>
+        </div>
+        <div class="periodnav">
+          <button id="cprev" aria-label="이전">‹</button>
+          <div id="clabel"></div>
+          <button id="cnext" aria-label="다음">›</button>
+        </div>
         <div id="chart"></div>
       </div>
 
@@ -422,6 +448,10 @@ let type='expense', tab='list', rType='expense', cType='expense';
 let treeOpen={}; // (legacy, unused)
 let catNav={big:null, mid:null}; // drill-down position in 분류 관리
 let payeeStatType='expense'; // which side the 거래처별 tab shows
+let chartLevel=0;            // 0=대,1=중,2=소
+let chartPeriod='month';     // day|week|month|year
+let chartType='expense';     // expense|income
+let chartRef=new Date();     // reference date for the current period window
 let editingAsset=null; // asset id currently being balance-edited
 let editingLiab=null; // liability id currently being balance-edited
 
@@ -641,29 +671,24 @@ function refreshAcct(){
 }
 // configure form layout + from/to selects for the current type
 function applyType(){
-  const isMove = type==='transfer'||type==='cardpay';
+  const isMove = type==='transfer';
   $('ieFields').style.display = isMove?'none':'';
   $('moveFields').style.display = isMove?'':'none';
   if(type==='transfer'){
     $('fromLabel').textContent='출금 (자산)';
-    $('toLabel').textContent='입금 (자산)';
+    $('toLabel').textContent='입금 (자산 / 카드대금·부채상환)';
     $('fromSel').innerHTML=endpointOptions({assets:true,placeholder:'출금 자산 선택'});
-    $('toSel').innerHTML=endpointOptions({assets:true,placeholder:'입금 자산 선택'});
-    $('memo').placeholder='예: 비상금 이체';
-  }else if(type==='cardpay'){
-    $('fromLabel').textContent='납부 출금 (통장)';
-    $('toLabel').textContent='납부 대상 (카드/부채)';
-    $('fromSel').innerHTML=endpointOptions({assets:true,placeholder:'출금 자산 선택'});
-    $('toSel').innerHTML=endpointOptions({cards:true,liabs:true,placeholder:'카드/부채 선택'});
-    $('memo').placeholder='예: 카드 대금';
+    // target can be another asset, OR a credit card / liability (= 카드대금 정산)
+    $('toSel').innerHTML=endpointOptions({assets:true,cards:true,liabs:true,placeholder:'입금/납부 대상 선택'});
+    $('memo').placeholder='예: 비상금 이체 / 카드 대금';
   }else{
     fillCats();refreshPayeeList();
     $('memo').placeholder='예: 점심 식사';
   }
 }
-// when paying a credit card that has a linked payment account, prefill the 출금 통장
+// when the transfer target is a credit card with a linked payment account, prefill 출금 통장
 $('toSel').onchange=()=>{
-  if(type!=='cardpay') return;
+  if(type!=='transfer') return;
   const to=$('toSel').value;
   if(to&&to.startsWith('card:')){
     const c=cardById(to.slice(5));
@@ -681,17 +706,21 @@ $('seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;type=b.data
 $('add').onclick=()=>{
   const amt=parseFloat($('amt').value);
   if(!amt||amt<=0){$('amt').focus();return;}
-  if(type==='transfer'||type==='cardpay'){
+  if(type==='transfer'){
     const from=$('fromSel').value, to=$('toSel').value;
     if(!from){alert('출금 계정을 선택하세요.');return;}
-    if(!to){alert(type==='cardpay'?'납부 대상(카드/부채)을 선택하세요.':'입금 계정을 선택하세요.');return;}
+    if(!to){alert('입금/납부 대상을 선택하세요.');return;}
     if(from===to){alert('출금과 입금이 같습니다.');return;}
-    state.tx.push({id:Date.now(),type,amt,from,to,memo:$('memo').value.trim(),date:$('date').value});
+    // if target is a card or liability, store as a 'cardpay' settlement so it
+    // reduces debt (and is excluded from 지출). asset→asset stays a 'transfer'.
+    const isSettle = to.startsWith('card:') || to.startsWith('liab:');
+    const txType = isSettle ? 'cardpay' : 'transfer';
+    state.tx.push({id:Date.now(),type:txType,amt,from,to,memo:$('memo').value.trim(),date:$('date').value});
   }else{
     state.tx.push({id:Date.now(),type,amt,cat:$('cat').value,sub:$('sub').value||'',sub2:$('sub2').value||'',payee:$('payee').value.trim(),acct:$('acct').value||'',memo:$('memo').value.trim(),date:$('date').value});
   }
   save();$('amt').value='';$('payee').value='';$('memo').value='';
-  if(type!=='transfer'&&type!=='cardpay') refreshPayeeList();
+  if(type==='expense'||type==='income') refreshPayeeList();
   render();
 };
 
@@ -702,7 +731,8 @@ $('next').onclick=()=>{cur.setMonth(cur.getMonth()+1);render();checkRecur();};
 /* ---------- tabs ---------- */
 document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
-  ['list','assets','chart','payeestat','budget','recur','cats'].forEach(t=>$('tab-'+t).style.display=t===tab?'':'none');};
+  ['list','assets','chart','payeestat','budget','recur','cats'].forEach(t=>$('tab-'+t).style.display=t===tab?'':'none');
+  if(tab==='chart'){ chartRef=new Date(cur); renderChart(); }};
 
 /* ---------- recurring: type segment + cascading cats ---------- */
 function fillRCats(){
@@ -888,6 +918,48 @@ $('budSave').onclick=()=>{const v=parseFloat($('budAmt').value);if(!v||v<=0){$('
 /* ---------- 거래처별 집계 toggle ---------- */
 $('payeeStatToggle').onclick=()=>{ payeeStatType = payeeStatType==='expense'?'income':'expense'; renderPayeeStat(); };
 
+/* ---------- 분류별 차트 (level × period) ---------- */
+const ymd = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function startOfWeek(d){ // week starts Monday
+  const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const wd=(x.getDay()+6)%7; x.setDate(x.getDate()-wd); return x;
+}
+// returns {from, to (inclusive), label} for the current chartPeriod around chartRef
+function periodRange(){
+  const d=chartRef;
+  if(chartPeriod==='day'){
+    const s=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    return {from:ymd(s),to:ymd(s),label:`${s.getFullYear()}년 ${s.getMonth()+1}월 ${s.getDate()}일`};
+  }
+  if(chartPeriod==='week'){
+    const s=startOfWeek(d); const e=new Date(s); e.setDate(s.getDate()+6);
+    const wk=Math.ceil((s.getDate()+ new Date(s.getFullYear(),s.getMonth(),1).getDay())/7);
+    return {from:ymd(s),to:ymd(e),label:`${s.getMonth()+1}.${s.getDate()} ~ ${e.getMonth()+1}.${e.getDate()}`};
+  }
+  if(chartPeriod==='year'){
+    const s=new Date(d.getFullYear(),0,1), e=new Date(d.getFullYear(),11,31);
+    return {from:ymd(s),to:ymd(e),label:`${d.getFullYear()}년`};
+  }
+  // month
+  const s=new Date(d.getFullYear(),d.getMonth(),1), e=new Date(d.getFullYear(),d.getMonth()+1,0);
+  return {from:ymd(s),to:ymd(e),label:`${d.getFullYear()}년 ${d.getMonth()+1}월`};
+}
+function shiftPeriod(dir){
+  const d=new Date(chartRef);
+  if(chartPeriod==='day') d.setDate(d.getDate()+dir);
+  else if(chartPeriod==='week') d.setDate(d.getDate()+7*dir);
+  else if(chartPeriod==='year') d.setFullYear(d.getFullYear()+dir);
+  else d.setMonth(d.getMonth()+dir);
+  chartRef=d; renderChart();
+}
+$('chartLevel').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartLevel=+b.dataset.lv;
+  [...$('chartLevel').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
+$('chartPeriod').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartPeriod=b.dataset.pd;
+  [...$('chartPeriod').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
+$('chartTypeToggle').onclick=()=>{ chartType=chartType==='expense'?'income':'expense'; renderChart(); };
+$('cprev').onclick=()=>shiftPeriod(-1);
+$('cnext').onclick=()=>shiftPeriod(1);
+
 /* ---------- assets, liabilities & cards ---------- */
 $('assetAdd').onclick=()=>{
   const name=$('newAsset').value.trim();
@@ -910,14 +982,15 @@ $('newCardKind').onchange=refreshCardLinkSelect;
 function refreshCardLinkSelect(){
   const kind=$('newCardKind').value;
   if(kind==='check'){
-    $('newCardLink').innerHTML='<option value="">차감 통장 선택 (필수)</option>'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('');
+    $('newCardLinkLabel').textContent='차감 통장';
+    $('newCardLink').innerHTML='<option value="">통장 선택 (필수)</option>'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('');
     $('newCardPayRow').style.display='none';
   }else{
-    // credit: link to an existing liability, or auto-create one
-    $('newCardLink').innerHTML='<option value="">누적 부채: 자동 생성(카드명)</option>'+state.liabilities.map(l=>`<option value="liab:${l.id}">누적 부채: ${esc(l.name)} (기존)</option>`).join('');
-    // optional payment account
+    $('newCardLinkLabel').textContent='누적 부채';
+    $('newCardLink').innerHTML='<option value="">자동 생성 (카드명으로 부채 생성)</option>'+state.liabilities.map(l=>`<option value="liab:${l.id}">${esc(l.name)} (기존 부채)</option>`).join('');
+    // optional payment account (연결계좌)
     $('newCardPayRow').style.display='';
-    $('newCardPayAcct').innerHTML='<option value="">대금 출금계좌: 연결 안 함 (선택)</option>'+state.assets.map(a=>`<option value="${a.id}">대금 출금계좌: ${esc(a.name)}</option>`).join('');
+    $('newCardPayAcct').innerHTML='<option value="">연결 안 함</option>'+state.assets.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
   }
 }
 $('cardAdd').onclick=()=>{
@@ -1130,13 +1203,11 @@ function render(){
       <button class="del" data-id="${t.id}">✕</button></div>`;
   }).join(''):'<div class="empty">아직 내역이 없습니다.<br>왼쪽에서 첫 기록을 추가해 보세요.</div>';
 
-  // chart — aggregated by 대분류
+  // 분류별 차트 (separate level/period controls)
+  renderChart();
+
+  // byCat for 예산 (this viewed month, 대분류, expense)
   const byCat={};rows.filter(t=>t.type==='expense').forEach(t=>byCat[t.cat]=(byCat[t.cat]||0)+t.amt);
-  const ents=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);const max=ents.length?ents[0][1]:1;
-  $('chart').innerHTML=ents.length?ents.map(([c,v],i)=>`
-    <div class="barrow"><div class="top"><b>${esc(c)}</b><span class="n">${won(v)} · ${Math.round(v/exp*100)}%</span></div>
-    <div class="track"><div class="fill" style="width:${v/max*100}%;background:${COLORS[i%COLORS.length]}"></div></div></div>`).join('')
-    :'<div class="empty">이번 달 지출이 없습니다.</div>';
 
   // budgets — by 대분류
   $('budCat').innerHTML=opt(bigNames('expense'),null);
@@ -1253,6 +1324,39 @@ function renderAssets(){
       <div class="acts"><button class="card-editbtn" data-id="${c.id}">연결변경</button><button class="danger card-delbtn" data-id="${c.id}">삭제</button></div>
     </div>`;
   }).join('') : '<div class="empty" style="padding:16px 0">등록된 카드가 없습니다.</div>';
+}
+
+/* 분류별 차트: aggregate by chosen level over the chosen period window */
+function renderChart(){
+  $('chartTypeToggle').textContent = chartType==='expense'?'지출 ▸ 수입 보기':'수입 ▸ 지출 보기';
+  const {from,to,label}=periodRange();
+  $('clabel').textContent=label;
+  // filter tx: matching type, date within [from,to]
+  const rows=state.tx.filter(t=>t.type===chartType && t.date>=from && t.date<=to);
+  // group key by selected level (full path up to that level); blank sub levels grouped as "(미지정)"
+  const byKey={};
+  rows.forEach(t=>{
+    let parts;
+    if(chartLevel===0) parts=[t.cat||'(미지정)'];
+    else if(chartLevel===1) parts=[t.cat||'(미지정)', t.sub||'(중분류 없음)'];
+    else parts=[t.cat||'(미지정)', t.sub||'(중분류 없음)', t.sub2||'(소분류 없음)'];
+    const key=parts.join(' › ');
+    byKey[key]=(byKey[key]||0)+t.amt;
+  });
+  const ents=Object.entries(byKey).sort((a,b)=>b[1]-a[1]);
+  const total=ents.reduce((s,[,v])=>s+v,0);
+  const max=ents.length?ents[0][1]:1;
+  const accent=chartType==='expense'?'var(--coral)':'var(--teal)';
+  const lvName=['대분류','중분류','소분류'][chartLevel];
+  const pdName={day:'일간',week:'주간',month:'월간',year:'연간'}[chartPeriod];
+  if(!ents.length){
+    $('chart').innerHTML=`<div class="empty">${label} 동안 ${chartType==='expense'?'지출':'수입'} 내역이 없습니다.</div>`;
+    return;
+  }
+  $('chart').innerHTML=ents.map(([k,v],i)=>`
+    <div class="barrow"><div class="top"><b>${esc(k)}</b><span class="n">${won(v)} · ${Math.round(v/total*100)}%</span></div>
+    <div class="track"><div class="fill" style="width:${v/max*100}%;background:${chartLevel===0?COLORS[i%COLORS.length]:accent}"></div></div></div>`).join('')
+    + `<div class="nums" style="margin-top:8px;color:var(--muted);font-size:12px">${pdName} · ${lvName} 기준 · ${ents.length}개 · 합계 ${won(total)}</div>`;
 }
 
 /* 거래처별 집계: this month, by payee, for the toggled type */
