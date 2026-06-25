@@ -2,7 +2,7 @@
    Caches the app shell so the app opens offline. Bump CACHE when you upload a
    new index.html so devices fetch the fresh version. User data lives in
    localStorage / the linked Drive file and is never touched by this cache. */
-const CACHE = 'budget-v1';
+const CACHE = 'budget-v2';
 const ASSETS = [
   './',
   './index.html',

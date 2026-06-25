@@ -13,6 +13,9 @@
 <meta name="apple-mobile-web-app-title" content="가계부">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+<!-- Excel export (loaded lazily; app works offline without it) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --ink:#1a1d29;--paper:#fbf9f4;--rule:#e3ddd0;
@@ -61,6 +64,18 @@
   .periodnav button{border:1px solid var(--rule);background:#fff;width:32px;height:32px;border-radius:8px;font-size:17px;cursor:pointer;color:var(--ink)}
   .periodnav button:hover{background:var(--ink);color:#fff}
   .periodnav #clabel{font-size:14px;font-weight:700;min-width:150px;text-align:center}
+  .pielegend{margin-top:14px;display:flex;flex-direction:column;gap:2px}
+  .legrow{display:flex;align-items:center;gap:9px;padding:8px 6px;border-bottom:1px solid var(--rule);font-size:13px}
+  .legrow:last-child{border-bottom:none}
+  .legrow.legclick{cursor:pointer;border-radius:8px}
+  .legrow.legclick:hover{background:var(--paper)}
+  .legdot{width:11px;height:11px;border-radius:3px;flex:none}
+  .legname{flex:1;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .legval{font-variant-numeric:tabular-nums;color:var(--muted);flex:none}
+  .legchev{color:var(--muted);flex:none;font-weight:700}
+  #drillcrumb{margin-bottom:10px}
+  #drillcrumb a.dcrumb{color:var(--teal);cursor:pointer;font-weight:700}
+  #drillcrumb a.dcrumb:hover{text-decoration:underline}
   .tx .dot.mov{background:var(--ink)!important}
   label.fld{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:12px 0 5px}
   input,select{width:100%;padding:10px 12px;border:1px solid var(--rule);border-radius:9px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
@@ -320,26 +335,46 @@
       </div>
 
       <div class="panel" id="tab-chart" style="display:none">
-        <h2>분류별 집계 <span class="mini" id="chartTypeToggle">지출 ↔ 수입</span></h2>
-        <div class="chartctl">
-          <div class="seg seg-sm" id="chartLevel">
-            <button class="on" data-lv="0">대분류</button>
-            <button data-lv="1">중분류</button>
-            <button data-lv="2">소분류</button>
-          </div>
-          <div class="seg seg-sm" id="chartPeriod">
-            <button data-pd="day">일간</button>
-            <button data-pd="week">주간</button>
-            <button class="on" data-pd="month">월간</button>
-            <button data-pd="year">연간</button>
-          </div>
+        <h2>분류별 차트 <span class="mini" id="chartTypeToggle">지출 ↔ 수입</span></h2>
+        <div class="seg seg-sm" id="chartView" style="margin-bottom:12px">
+          <button class="on" data-vw="share">비중(원형)</button>
+          <button data-vw="drill">드릴다운</button>
+          <button data-vw="trend">추세</button>
         </div>
-        <div class="periodnav">
+
+        <!-- level selector: used by share & trend -->
+        <div class="seg seg-sm" id="chartLevel" style="margin-bottom:10px">
+          <button class="on" data-lv="0">대분류</button>
+          <button data-lv="1">중분류</button>
+          <button data-lv="2">소분류</button>
+        </div>
+
+        <!-- period selector: used by share & drill -->
+        <div class="seg seg-sm" id="chartPeriod" style="margin-bottom:10px">
+          <button data-pd="day">일간</button>
+          <button data-pd="week">주간</button>
+          <button class="on" data-pd="month">월간</button>
+          <button data-pd="year">연간</button>
+        </div>
+
+        <!-- trend span selector: used by trend only -->
+        <div class="seg seg-sm" id="trendSpan" style="margin-bottom:10px;display:none">
+          <button data-sp="6">최근 6</button>
+          <button class="on" data-sp="12">최근 12</button>
+          <button data-sp="24">최근 24</button>
+        </div>
+
+        <div class="periodnav" id="chartNav">
           <button id="cprev" aria-label="이전">‹</button>
           <div id="clabel"></div>
           <button id="cnext" aria-label="다음">›</button>
         </div>
+
+        <div id="drillcrumb" class="catcrumb" style="display:none"></div>
         <div id="chart"></div>
+        <div style="margin-top:16px;border-top:1px solid var(--rule);padding-top:14px;text-align:center">
+          <button id="excelBtn" class="syncbtn primary">전체 데이터 엑셀로 내려받기</button>
+        </div>
       </div>
 
       <div class="panel" id="tab-payeestat" style="display:none">
@@ -452,6 +487,9 @@ let chartLevel=0;            // 0=대,1=중,2=소
 let chartPeriod='month';     // day|week|month|year
 let chartType='expense';     // expense|income
 let chartRef=new Date();     // reference date for the current period window
+let chartViewMode='share';   // share|drill|trend
+let chartDrill={big:null,mid:null}; // drilldown position
+let trendSpan=12;            // number of periods back for trend
 let editingAsset=null; // asset id currently being balance-edited
 let editingLiab=null; // liability id currently being balance-edited
 
@@ -732,7 +770,7 @@ $('next').onclick=()=>{cur.setMonth(cur.getMonth()+1);render();checkRecur();};
 document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   ['list','assets','chart','payeestat','budget','recur','cats'].forEach(t=>$('tab-'+t).style.display=t===tab?'':'none');
-  if(tab==='chart'){ chartRef=new Date(cur); renderChart(); }};
+  if(tab==='chart'){ chartRef=new Date(cur); applyChartControls(); renderChart(); }};
 
 /* ---------- recurring: type segment + cascading cats ---------- */
 function fillRCats(){
@@ -959,6 +997,86 @@ $('chartPeriod').onclick=e=>{const b=e.target.closest('button');if(!b)return;cha
 $('chartTypeToggle').onclick=()=>{ chartType=chartType==='expense'?'income':'expense'; renderChart(); };
 $('cprev').onclick=()=>shiftPeriod(-1);
 $('cnext').onclick=()=>shiftPeriod(1);
+$('chartView').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartViewMode=b.dataset.vw;
+  chartDrill={big:null,mid:null};
+  [...$('chartView').children].forEach(x=>x.classList.toggle('on',x===b));
+  applyChartControls();renderChart();};
+$('trendSpan').onclick=e=>{const b=e.target.closest('button');if(!b)return;trendSpan=+b.dataset.sp;
+  [...$('trendSpan').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
+// show/hide controls relevant to the active view mode
+function applyChartControls(){
+  const m=chartViewMode;
+  $('chartLevel').style.display = (m==='share'||m==='trend')?'':'none';
+  $('chartPeriod').style.display = (m==='share'||m==='drill')?'':'none';
+  $('trendSpan').style.display = (m==='trend')?'':'none';
+  $('chartNav').style.display = (m==='share'||m==='drill')?'':'none';
+  $('drillcrumb').style.display = (m==='drill')?'':'none';
+}
+
+/* ---------- Excel export ---------- */
+$('excelBtn').onclick=()=>{
+  if(typeof XLSX==='undefined'){ alert('엑셀 기능을 불러오지 못했습니다. 인터넷에 연결한 뒤 다시 시도하세요.'); return; }
+  exportExcel();
+};
+/* drilldown: clicking a legend row drills into that category; breadcrumb navigates back */
+document.body.addEventListener('click',e=>{
+  if(chartViewMode!=='drill') {
+    const crumb0=e.target.closest('.dcrumb'); if(!crumb0) return;
+  }
+  const leg=e.target.closest('.legclick');
+  if(leg && chartViewMode==='drill'){
+    const name=leg.dataset.name;
+    if(name && !name.startsWith('(')){
+      if(!chartDrill.big) chartDrill.big=name;
+      else if(!chartDrill.mid) chartDrill.mid=name;
+      renderChart();
+    }
+    return;
+  }
+  const crumb=e.target.closest('.dcrumb');
+  if(crumb){
+    if(crumb.dataset.to==='root') chartDrill={big:null,mid:null};
+    else if(crumb.dataset.to==='big') chartDrill.mid=null;
+    renderChart();
+    return;
+  }
+});
+function exportExcel(){
+  const typeName={income:'수입',expense:'지출',transfer:'이체',cardpay:'카드대금'};
+  // 1) 거래내역 sheet
+  const txRows=state.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id).map(t=>{
+    const isMove=t.type==='transfer'||t.type==='cardpay';
+    return {
+      '날짜':t.date,
+      '구분':typeName[t.type]||t.type,
+      '금액':t.amt,
+      '대분류':isMove?'':(t.cat||''),
+      '중분류':isMove?'':(t.sub||''),
+      '소분류':isMove?'':(t.sub2||''),
+      '거래처':isMove?'':(t.payee||''),
+      '출처/입금':isMove? (endpointLabel(t.from)+' → '+endpointLabel(t.to)) : acctLabel(t.acct),
+      '내용':t.memo||''
+    };
+  });
+  // 2) 자산 sheet
+  const asRows=state.assets.map(a=>({'자산':a.name,'잔액':assetBalance(a.id)}));
+  // 3) 부채 sheet
+  const liRows=(state.liabilities||[]).map(l=>({'부채':l.name,'잔액':liabBalance(l.id)}));
+  // 4) 카드 sheet
+  const cdRows=state.cards.map(c=>({
+    '카드':c.name,'종류':isCredit(c)?'신용':'체크',
+    '누적부채':isCredit(c)?(liabById(c.liabId)?.name||''):'',
+    '차감/연결계좌':isCredit(c)?(c.assetId?(assetById(c.assetId)?.name||''):'연결안함'):(assetById(c.assetId)?.name||''),
+    '미결제':isCredit(c)?liabBalance(c.liabId):''
+  }));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows.length?txRows:[{'날짜':'','구분':'','금액':''}]), '거래내역');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(asRows.length?asRows:[{'자산':'','잔액':''}]), '자산');
+  if(liRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(liRows), '부채');
+  if(cdRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cdRows), '카드');
+  const today=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `가계부_${today}.xlsx`);
+}
 
 /* ---------- assets, liabilities & cards ---------- */
 $('assetAdd').onclick=()=>{
@@ -1329,34 +1447,176 @@ function renderAssets(){
 /* 분류별 차트: aggregate by chosen level over the chosen period window */
 function renderChart(){
   $('chartTypeToggle').textContent = chartType==='expense'?'지출 ▸ 수입 보기':'수입 ▸ 지출 보기';
+  applyChartControls();
+  if(chartViewMode==='trend'){ renderTrend(); return; }
+  if(chartViewMode==='drill'){ renderDrill(); return; }
+  renderShare();
+}
+
+// ----- helpers -----
+const TAU=Math.PI*2;
+function polar(cx,cy,r,a){ return [cx+r*Math.cos(a), cy+r*Math.sin(a)]; }
+// build an SVG donut chart from [{name,value,color}]; returns svg string
+function donutSVG(data, size=220, thick=46){
+  const total=data.reduce((s,d)=>s+d.value,0);
+  const cx=size/2, cy=size/2, r=size/2-4, ri=r-thick;
+  if(total<=0) return '';
+  let a=-Math.PI/2; // start at top
+  let paths='';
+  data.forEach(d=>{
+    const frac=d.value/total;
+    const a2=a+frac*TAU;
+    const large=frac>0.5?1:0;
+    const [x1,y1]=polar(cx,cy,r,a), [x2,y2]=polar(cx,cy,r,a2);
+    const [x3,y3]=polar(cx,cy,ri,a2), [x4,y4]=polar(cx,cy,ri,a);
+    // full-circle guard
+    if(frac>=0.9999){
+      paths+=`<circle cx="${cx}" cy="${cy}" r="${(r+ri)/2}" fill="none" stroke="${d.color}" stroke-width="${thick}"/>`;
+    }else{
+      paths+=`<path d="M${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L${x3.toFixed(2)},${y3.toFixed(2)} A${ri},${ri} 0 ${large} 0 ${x4.toFixed(2)},${y4.toFixed(2)} Z" fill="${d.color}" stroke="#fff" stroke-width="1.5"/>`;
+    }
+    a=a2;
+  });
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="display:block;margin:0 auto">${paths}
+    <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="12" fill="var(--muted)">합계</text>
+    <text x="${cx}" y="${cy+14}" text-anchor="middle" font-size="15" font-weight="800" fill="var(--ink)">${won(total)}</text></svg>`;
+}
+function legendHTML(data, clickable){
+  const total=data.reduce((s,d)=>s+d.value,0)||1;
+  return `<div class="pielegend">`+data.map((d,i)=>`
+    <div class="legrow ${clickable?'legclick':''}" ${clickable?`data-name="${esc(d.rawName||d.name)}"`:''}>
+      <span class="legdot" style="background:${d.color}"></span>
+      <span class="legname">${esc(d.name)}</span>
+      <span class="legval">${won(d.value)} · ${Math.round(d.value/total*100)}%</span>
+      ${clickable&&d.canDrill?'<span class="legchev">›</span>':''}
+    </div>`).join('')+`</div>`;
+}
+
+// group rows by a key function → sorted [{name,value}]
+function groupRows(rows, keyFn){
+  const m={};
+  rows.forEach(t=>{ const k=keyFn(t); m[k]=(m[k]||0)+t.amt; });
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]).map(([name,value])=>({name,value}));
+}
+
+// ----- 비중(원형) view -----
+function renderShare(){
   const {from,to,label}=periodRange();
   $('clabel').textContent=label;
-  // filter tx: matching type, date within [from,to]
   const rows=state.tx.filter(t=>t.type===chartType && t.date>=from && t.date<=to);
-  // group key by selected level (full path up to that level); blank sub levels grouped as "(미지정)"
-  const byKey={};
-  rows.forEach(t=>{
-    let parts;
-    if(chartLevel===0) parts=[t.cat||'(미지정)'];
-    else if(chartLevel===1) parts=[t.cat||'(미지정)', t.sub||'(중분류 없음)'];
-    else parts=[t.cat||'(미지정)', t.sub||'(중분류 없음)', t.sub2||'(소분류 없음)'];
-    const key=parts.join(' › ');
-    byKey[key]=(byKey[key]||0)+t.amt;
-  });
-  const ents=Object.entries(byKey).sort((a,b)=>b[1]-a[1]);
-  const total=ents.reduce((s,[,v])=>s+v,0);
-  const max=ents.length?ents[0][1]:1;
-  const accent=chartType==='expense'?'var(--coral)':'var(--teal)';
+  const keyFn = chartLevel===0 ? (t=>t.cat||'(미지정)')
+    : chartLevel===1 ? (t=>(t.cat||'(미지정)')+' › '+(t.sub||'(중분류 없음)'))
+    : (t=>(t.cat||'(미지정)')+' › '+(t.sub||'(중분류 없음)')+' › '+(t.sub2||'(소분류 없음)'));
+  const g=groupRows(rows,keyFn);
   const lvName=['대분류','중분류','소분류'][chartLevel];
   const pdName={day:'일간',week:'주간',month:'월간',year:'연간'}[chartPeriod];
-  if(!ents.length){
-    $('chart').innerHTML=`<div class="empty">${label} 동안 ${chartType==='expense'?'지출':'수입'} 내역이 없습니다.</div>`;
-    return;
+  if(!g.length){ $('chart').innerHTML=`<div class="empty">${label} 동안 ${chartType==='expense'?'지출':'수입'} 내역이 없습니다.</div>`; return; }
+  const data=g.map((d,i)=>({...d,color:COLORS[i%COLORS.length]}));
+  $('chart').innerHTML = donutSVG(data) + legendHTML(data,false)
+    + `<div class="nums" style="margin-top:8px;color:var(--muted);font-size:12px;text-align:center">${pdName} · 전체 ${lvName} 기준 · ${data.length}개</div>`;
+}
+
+// ----- 드릴다운 view -----
+function renderDrill(){
+  const {from,to,label}=periodRange();
+  $('clabel').textContent=label;
+  const rows=state.tx.filter(t=>t.type===chartType && t.date>=from && t.date<=to);
+  // breadcrumb
+  let crumb='<span class="seg-c">';
+  if(!chartDrill.big){ crumb+='<span class="cur">대분류</span>'; }
+  else if(!chartDrill.mid){ crumb+='<a class="dcrumb" data-to="root">대분류</a><span class="sep">›</span><span class="cur">'+esc(chartDrill.big)+'</span>'; }
+  else { crumb+='<a class="dcrumb" data-to="root">대분류</a><span class="sep">›</span><a class="dcrumb" data-to="big">'+esc(chartDrill.big)+'</a><span class="sep">›</span><span class="cur">'+esc(chartDrill.mid)+'</span>'; }
+  crumb+='</span>';
+  $('drillcrumb').innerHTML=crumb;
+
+  let level, filtered, keyFn;
+  if(!chartDrill.big){ level=0; filtered=rows; keyFn=t=>t.cat||'(미지정)'; }
+  else if(!chartDrill.mid){ level=1; filtered=rows.filter(t=>(t.cat||'(미지정)')===chartDrill.big); keyFn=t=>t.sub||'(중분류 없음)'; }
+  else { level=2; filtered=rows.filter(t=>(t.cat||'(미지정)')===chartDrill.big && (t.sub||'(중분류 없음)')===chartDrill.mid); keyFn=t=>t.sub2||'(소분류 없음)'; }
+  const g=groupRows(filtered,keyFn);
+  if(!g.length){ $('chart').innerHTML=`<div class="empty">${label} 동안 내역이 없습니다.</div>`; return; }
+  // determine which slices can drill further
+  const canDrillNext = level<2;
+  const data=g.map((d,i)=>{
+    let canDrill=false;
+    if(canDrillNext && !d.name.startsWith('(')){
+      // check there is deeper data under this name
+      canDrill=true;
+    }
+    return {...d, rawName:d.name, color:COLORS[i%COLORS.length], canDrill};
+  });
+  $('chart').innerHTML = donutSVG(data) + legendHTML(data,true)
+    + `<div class="nums" style="margin-top:8px;color:var(--muted);font-size:12px;text-align:center">${['대분류','중분류','소분류'][level]} · 조각을 누르면 하위로 이동</div>`;
+}
+
+// ----- 추세 view (line chart) -----
+function buildTrendPeriods(){
+  // returns array of {from,to,label} for the last `trendSpan` periods ending at chartRef
+  const arr=[]; const base=new Date(chartRef);
+  for(let i=trendSpan-1;i>=0;i--){
+    const d=new Date(base);
+    if(chartPeriod==='year') d.setFullYear(d.getFullYear()-i);
+    else if(chartPeriod==='week') d.setDate(d.getDate()-7*i);
+    else if(chartPeriod==='day') d.setDate(d.getDate()-i);
+    else d.setMonth(d.getMonth()-i);
+    const save=chartRef; chartRef=d; const r=periodRange(); chartRef=save;
+    arr.push(r);
   }
-  $('chart').innerHTML=ents.map(([k,v],i)=>`
-    <div class="barrow"><div class="top"><b>${esc(k)}</b><span class="n">${won(v)} · ${Math.round(v/total*100)}%</span></div>
-    <div class="track"><div class="fill" style="width:${v/max*100}%;background:${chartLevel===0?COLORS[i%COLORS.length]:accent}"></div></div></div>`).join('')
-    + `<div class="nums" style="margin-top:8px;color:var(--muted);font-size:12px">${pdName} · ${lvName} 기준 · ${ents.length}개 · 합계 ${won(total)}</div>`;
+  return arr;
+}
+function renderTrend(){
+  // top categories at the chosen level over the span, each a line
+  const periods=buildTrendPeriods();
+  const from=periods[0].from, to=periods[periods.length-1].to;
+  const allRows=state.tx.filter(t=>t.type===chartType && t.date>=from && t.date<=to);
+  const keyFn = chartLevel===0 ? (t=>t.cat||'(미지정)')
+    : chartLevel===1 ? (t=>(t.cat||'(미지정)')+' › '+(t.sub||'(중분류 없음)'))
+    : (t=>(t.cat||'(미지정)')+' › '+(t.sub||'(중분류 없음)')+' › '+(t.sub2||'(소분류 없음)'));
+  // pick top 5 categories by total
+  const totals=groupRows(allRows,keyFn).slice(0,5);
+  $('clabel').textContent = periods[0].label+' ~ '+periods[periods.length-1].label;
+  if(!totals.length){ $('chart').innerHTML=`<div class="empty">표시할 데이터가 없습니다.</div>`; return; }
+  // series: for each top category, value per period
+  const series=totals.map((c,i)=>{
+    const vals=periods.map(p=>{
+      return state.tx.filter(t=>t.type===chartType && t.date>=p.from && t.date<=p.to && keyFn(t)===c.name)
+                     .reduce((s,t)=>s+t.amt,0);
+    });
+    return {name:c.name, vals, color:COLORS[i%COLORS.length]};
+  });
+  const maxV=Math.max(1,...series.flatMap(s=>s.vals));
+  // SVG line chart
+  const W=Math.max(320, periods.length*46), H=200, padL=8, padR=8, padT=12, padB=28;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const x=i=> padL + (periods.length===1?plotW/2: i*plotW/(periods.length-1));
+  const y=v=> padT + plotH - (v/maxV)*plotH;
+  let svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" style="overflow:visible">`;
+  // baseline
+  svg+=`<line x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}" stroke="var(--rule)"/>`;
+  // x labels (short)
+  periods.forEach((p,i)=>{
+    let lbl=p.label;
+    if(chartPeriod==='month'){ const m=lbl.match(/(\d+)월/); lbl=m?m[1]+'월':lbl; }
+    else if(chartPeriod==='year'){ lbl=lbl.replace('년',''); }
+    else if(chartPeriod==='day'){ const m=lbl.match(/(\d+)월 (\d+)일/); lbl=m?`${m[1]}/${m[2]}`:lbl; }
+    else if(chartPeriod==='week'){ lbl=lbl.split(' ~ ')[0]; }
+    if(periods.length>12 && i%2===1){ /* skip alternate labels when crowded */ }
+    else svg+=`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="9" fill="var(--muted)">${esc(lbl)}</text>`;
+  });
+  // lines + dots
+  series.forEach(s=>{
+    const pts=s.vals.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    svg+=`<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s.vals.forEach((v,i)=>{ svg+=`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.6" fill="${s.color}"/>`; });
+  });
+  svg+=`</svg>`;
+  // legend with each series total
+  const legend=series.map(s=>`<div class="legrow"><span class="legdot" style="background:${s.color}"></span>
+    <span class="legname">${esc(s.name)}</span><span class="legval">${won(s.vals.reduce((a,b)=>a+b,0))}</span></div>`).join('');
+  const pdName={day:'일간',week:'주간',month:'월간',year:'연간'}[chartPeriod];
+  const lvName=['대분류','중분류','소분류'][chartLevel];
+  $('chart').innerHTML = `<div style="overflow-x:auto">${svg}</div><div class="pielegend">${legend}</div>`
+    + `<div class="nums" style="margin-top:8px;color:var(--muted);font-size:12px;text-align:center">${pdName} 추세 · ${lvName} 상위 ${series.length}개 · 최근 ${trendSpan}구간</div>`;
 }
 
 /* 거래처별 집계: this month, by payee, for the toggled type */
