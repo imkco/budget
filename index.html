@@ -301,7 +301,12 @@
           </div>
           <div class="setrow" style="margin-top:8px">
             <select id="newCardLink"></select>
-            <button id="cardAdd">추가</button>
+          </div>
+          <div class="setrow" id="newCardPayRow" style="margin-top:8px;display:none">
+            <select id="newCardPayAcct"></select>
+          </div>
+          <div class="setrow" style="margin-top:8px">
+            <button id="cardAdd" style="flex:1">카드 추가</button>
           </div>
         </div>
       </div>
@@ -656,6 +661,18 @@ function applyType(){
     $('memo').placeholder='예: 점심 식사';
   }
 }
+// when paying a credit card that has a linked payment account, prefill the 출금 통장
+$('toSel').onchange=()=>{
+  if(type!=='cardpay') return;
+  const to=$('toSel').value;
+  if(to&&to.startsWith('card:')){
+    const c=cardById(to.slice(5));
+    if(c && c.assetId){
+      const opt=[...$('fromSel').options].find(o=>o.value==='asset:'+c.assetId);
+      if(opt) $('fromSel').value='asset:'+c.assetId;
+    }
+  }
+};
 $('seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;type=b.dataset.t;
   [...$('seg').children].forEach(x=>x.className='');
   const cls = type==='expense'?'exp':type==='income'?'inc':'mov';
@@ -893,10 +910,14 @@ $('newCardKind').onchange=refreshCardLinkSelect;
 function refreshCardLinkSelect(){
   const kind=$('newCardKind').value;
   if(kind==='check'){
-    $('newCardLink').innerHTML='<option value="">차감 통장 선택</option>'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('');
+    $('newCardLink').innerHTML='<option value="">차감 통장 선택 (필수)</option>'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('');
+    $('newCardPayRow').style.display='none';
   }else{
     // credit: link to an existing liability, or auto-create one
-    $('newCardLink').innerHTML='<option value="">자동 생성(카드명 부채)</option>'+state.liabilities.map(l=>`<option value="liab:${l.id}">${esc(l.name)} (기존 부채)</option>`).join('');
+    $('newCardLink').innerHTML='<option value="">누적 부채: 자동 생성(카드명)</option>'+state.liabilities.map(l=>`<option value="liab:${l.id}">누적 부채: ${esc(l.name)} (기존)</option>`).join('');
+    // optional payment account
+    $('newCardPayRow').style.display='';
+    $('newCardPayAcct').innerHTML='<option value="">대금 출금계좌: 연결 안 함 (선택)</option>'+state.assets.map(a=>`<option value="${a.id}">대금 출금계좌: ${esc(a.name)}</option>`).join('');
   }
 }
 $('cardAdd').onclick=()=>{
@@ -914,7 +935,8 @@ $('cardAdd').onclick=()=>{
     else { // auto-create a liability named after the card
       const l={id:uid('l'),name,opening:0}; state.liabilities.push(l); liabId=l.id;
     }
-    state.cards.push({id:uid('c'),name,kind:'credit',assetId:'',liabId});
+    const payAcct=$('newCardPayAcct').value||''; // optional default payment account
+    state.cards.push({id:uid('c'),name,kind:'credit',assetId:payAcct,liabId});
   }
   save();$('newCard').value='';render();refreshAcct();refreshCardLinkSelect();
 };
@@ -930,6 +952,7 @@ document.body.addEventListener('click',e=>{
   const adl=e.target.closest('.asset-delbtn'); if(adl){ assetDelete(adl.dataset.id); return; }
   const lrn=e.target.closest('.liab-renamebtn'); if(lrn){ liabRename(lrn.dataset.id); return; }
   const ldl=e.target.closest('.liab-delbtn'); if(ldl){ liabDelete(ldl.dataset.id); return; }
+  const ced=e.target.closest('.card-editbtn'); if(ced){ cardEditLink(ced.dataset.id); return; }
   const cdl=e.target.closest('.card-delbtn'); if(cdl){ cardDelete(cdl.dataset.id); return; }
 });
 
@@ -981,6 +1004,8 @@ function assetDelete(id){
   if(state.assets.length<=1){alert('자산은 최소 1개 있어야 합니다.');return;}
   const a=assetById(id);
   if(!confirm(`'${a.name}' 자산을 삭제할까요?`))return;
+  // detach this asset from any credit card using it as the (optional) payment account
+  state.cards.forEach(c=>{ if(isCredit(c)&&c.assetId===id) c.assetId=''; });
   state.assets=state.assets.filter(x=>x.id!==id);save();render();refreshAcct();
 }
 function cardDelete(id){
@@ -989,6 +1014,29 @@ function cardDelete(id){
   const c=cardById(id);
   if(!confirm(`'${c.name}' 카드를 삭제할까요?`))return;
   state.cards=state.cards.filter(x=>x.id!==id);save();render();refreshAcct();
+}
+// change a card's linked account (check: 차감 통장 / credit: 대금 출금계좌, 연결 해제 가능)
+function cardEditLink(id){
+  const c=cardById(id); if(!c) return;
+  const list=state.assets.map((a,i)=>`${i+1}. ${a.name}`).join('\n');
+  if(!isCredit(c)){
+    const cur=assetById(c.assetId)?.name||'(없음)';
+    const ans=(prompt(`'${c.name}' 체크카드의 차감 통장을 선택하세요 (번호 입력).\n현재: ${cur}\n\n${list}`,'')||'').trim();
+    const idx=parseInt(ans)-1;
+    if(isNaN(idx)||idx<0||idx>=state.assets.length){ if(ans)alert('번호가 올바르지 않습니다.'); return; }
+    c.assetId=state.assets[idx].id;
+  }else{
+    const cur=c.assetId?(assetById(c.assetId)?.name||'(삭제된 통장)'):'연결 안 함';
+    const ans=(prompt(`'${c.name}' 신용카드의 대금 출금계좌를 선택하세요.\n0 = 연결 안 함\n현재: ${cur}\n\n${list}`,'')||'').trim();
+    if(ans==='') return;
+    if(ans==='0'){ c.assetId=''; }
+    else{
+      const idx=parseInt(ans)-1;
+      if(isNaN(idx)||idx<0||idx>=state.assets.length){ alert('번호가 올바르지 않습니다.'); return; }
+      c.assetId=state.assets[idx].id;
+    }
+  }
+  save();render();refreshAcct();
 }
 
 /* ---------- recurring execution ----------
@@ -1192,11 +1240,17 @@ function renderAssets(){
     const credit=isCredit(c);
     const linkName = credit? (liabById(c.liabId)?.name||'(삭제된 부채)') : (assetById(c.assetId)?.name||'(삭제된 자산)');
     const tag = credit?'신용':'체크';
-    const desc = credit? `누적 부채: ${esc(linkName)}` : `차감 통장: ${esc(linkName)}`;
+    let desc;
+    if(credit){
+      const payAcct = c.assetId? (assetById(c.assetId)?.name||'(삭제된 통장)') : '연결 안 함';
+      desc = `누적 부채: ${esc(linkName)} · 대금 출금: ${esc(payAcct)}`;
+    }else{
+      desc = `차감 통장: ${esc(linkName)}`;
+    }
     const bal = credit? ` · 미결제 ${won(liabBalance(c.liabId))}` : '';
     return `<div class="asrow">
       <div style="flex:1"><span class="anm">${esc(c.name)} <span class="badge" style="background:${credit?'var(--coral-soft)':'var(--teal-soft)'};color:${credit?'var(--coral)':'var(--teal)'}">${tag}</span></span><div class="sub2">${desc}${bal}</div></div>
-      <div class="acts"><button class="danger card-delbtn" data-id="${c.id}">삭제</button></div>
+      <div class="acts"><button class="card-editbtn" data-id="${c.id}">연결변경</button><button class="danger card-delbtn" data-id="${c.id}">삭제</button></div>
     </div>`;
   }).join('') : '<div class="empty" style="padding:16px 0">등록된 카드가 없습니다.</div>';
 }
