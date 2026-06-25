@@ -58,6 +58,8 @@
   .seg.seg-sm{margin-bottom:0}
   .seg.seg-sm button{padding:7px 4px;font-size:12px}
   .seg.seg-sm button.on{background:var(--ink);color:#fff}
+  #chartCat button.on.exp{background:var(--coral);color:#fff}
+  #chartCat button.on.inc{background:var(--teal);color:#fff}
   .chartctl{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
   .chartctl .seg{flex:1;min-width:180px}
   .periodnav{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:16px}
@@ -121,6 +123,15 @@
   .tabs button.on{color:var(--ink);border-bottom-color:var(--ink)}
   .foot{text-align:center;color:var(--muted);font-size:12px;margin-top:14px;line-height:1.7}
   .foot a{color:var(--teal);cursor:pointer}
+  .networth{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;margin-bottom:16px;border-radius:14px;background:linear-gradient(135deg,var(--ink),#2a2f45);color:#fff;flex-wrap:wrap}
+  .networth .nw-main{display:flex;flex-direction:column}
+  .networth .nw-label{font-size:12px;letter-spacing:.06em;color:#c9cdd8;font-weight:700}
+  .networth .nw-amt{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
+  .networth .nw-amt.neg{color:#ff9b8f}
+  .networth .nw-break{display:flex;gap:16px;font-size:12px}
+  .networth .nw-break div{text-align:right}
+  .networth .nw-break .k{color:#c9cdd8;font-weight:700}
+  .networth .nw-break .v{font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
   .syncbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:30px;padding:14px 18px;background:#fff;border:1px solid var(--rule);border-radius:14px;flex-wrap:wrap}
   .syncstatus{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700}
   .syncdot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none;transition:.2s}
@@ -290,6 +301,7 @@
       </div>
 
       <div class="panel" id="tab-assets" style="display:none">
+        <div class="networth" id="networth"></div>
         <h2>자산 <span class="mini" id="assetTotal"></span></h2>
         <div id="assetlist"></div>
         <div style="margin-top:14px;border-top:1px solid var(--rule);padding-top:14px">
@@ -335,14 +347,19 @@
       </div>
 
       <div class="panel" id="tab-chart" style="display:none">
-        <h2>분류별 차트 <span class="mini" id="chartTypeToggle">지출 ↔ 수입</span></h2>
+        <h2>차트</h2>
+        <div class="seg seg-sm" id="chartCat" style="margin-bottom:12px">
+          <button class="on exp" data-ct="expense">지출</button>
+          <button data-ct="income">수입</button>
+          <button data-ct="asset">자산</button>
+        </div>
         <div class="seg seg-sm" id="chartView" style="margin-bottom:12px">
           <button class="on" data-vw="share">비중(원형)</button>
           <button data-vw="drill">드릴다운</button>
           <button data-vw="trend">추세</button>
         </div>
 
-        <!-- level selector: used by share & trend -->
+        <!-- level selector: used by share & trend (지출/수입 only) -->
         <div class="seg seg-sm" id="chartLevel" style="margin-bottom:10px">
           <button class="on" data-lv="0">대분류</button>
           <button data-lv="1">중분류</button>
@@ -372,9 +389,6 @@
 
         <div id="drillcrumb" class="catcrumb" style="display:none"></div>
         <div id="chart"></div>
-        <div style="margin-top:16px;border-top:1px solid var(--rule);padding-top:14px;text-align:center">
-          <button id="excelBtn" class="syncbtn primary">전체 데이터 엑셀로 내려받기</button>
-        </div>
       </div>
 
       <div class="panel" id="tab-payeestat" style="display:none">
@@ -459,6 +473,7 @@
       <button id="unlinkDrive" class="syncbtn ghost" style="display:none">연결 해제</button>
       <a id="export" class="syncbtn ghost">파일로 내보내기</a>
       <a id="import" class="syncbtn ghost">불러오기</a>
+      <button id="excelBtn" class="syncbtn ghost">엑셀로 내려받기</button>
       <input type="file" id="file" accept="application/json" hidden>
     </div>
   </div>
@@ -994,7 +1009,14 @@ $('chartLevel').onclick=e=>{const b=e.target.closest('button');if(!b)return;char
   [...$('chartLevel').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
 $('chartPeriod').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartPeriod=b.dataset.pd;
   [...$('chartPeriod').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
-$('chartTypeToggle').onclick=()=>{ chartType=chartType==='expense'?'income':'expense'; renderChart(); };
+$('chartCat').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartType=b.dataset.ct;
+  [...$('chartCat').children].forEach(x=>{x.classList.remove('on','exp','inc');});
+  b.classList.add('on');
+  if(chartType==='expense') b.classList.add('exp'); else if(chartType==='income') b.classList.add('inc');
+  // asset category only supports the 비중(원형) view
+  if(chartType==='asset'){ chartViewMode='share'; chartDrill={big:null,mid:null};
+    [...$('chartView').children].forEach(x=>x.classList.toggle('on',x.dataset.vw==='share')); }
+  applyChartControls();renderChart();};
 $('cprev').onclick=()=>shiftPeriod(-1);
 $('cnext').onclick=()=>shiftPeriod(1);
 $('chartView').onclick=e=>{const b=e.target.closest('button');if(!b)return;chartViewMode=b.dataset.vw;
@@ -1005,19 +1027,16 @@ $('trendSpan').onclick=e=>{const b=e.target.closest('button');if(!b)return;trend
   [...$('trendSpan').children].forEach(x=>x.classList.toggle('on',x===b));renderChart();};
 // show/hide controls relevant to the active view mode
 function applyChartControls(){
-  const m=chartViewMode;
-  $('chartLevel').style.display = (m==='share'||m==='trend')?'':'none';
-  $('chartPeriod').style.display = (m==='share'||m==='drill')?'':'none';
-  $('trendSpan').style.display = (m==='trend')?'':'none';
-  $('chartNav').style.display = (m==='share'||m==='drill')?'':'none';
-  $('drillcrumb').style.display = (m==='drill')?'':'none';
+  const m=chartViewMode, isAsset=chartType==='asset';
+  // asset mode: no category levels, no view modes, no period — just a snapshot pie
+  $('chartView').style.display = isAsset?'none':'';
+  $('chartLevel').style.display = (!isAsset && (m==='share'||m==='trend'))?'':'none';
+  $('chartPeriod').style.display = (!isAsset && (m==='share'||m==='drill'))?'':'none';
+  $('trendSpan').style.display = (!isAsset && m==='trend')?'':'none';
+  $('chartNav').style.display = (!isAsset && (m==='share'||m==='drill'))?'':'none';
+  $('drillcrumb').style.display = (!isAsset && m==='drill')?'':'none';
 }
 
-/* ---------- Excel export ---------- */
-$('excelBtn').onclick=()=>{
-  if(typeof XLSX==='undefined'){ alert('엑셀 기능을 불러오지 못했습니다. 인터넷에 연결한 뒤 다시 시도하세요.'); return; }
-  exportExcel();
-};
 /* drilldown: clicking a legend row drills into that category; breadcrumb navigates back */
 document.body.addEventListener('click',e=>{
   if(chartViewMode!=='drill') {
@@ -1041,6 +1060,11 @@ document.body.addEventListener('click',e=>{
     return;
   }
 });
+/* ---------- Excel export (in sync bar) ---------- */
+$('excelBtn').onclick=()=>{
+  if(typeof XLSX==='undefined'){ alert('엑셀 기능을 불러오지 못했습니다. 인터넷에 연결한 뒤 다시 시도하세요.'); return; }
+  exportExcel();
+};
 function exportExcel(){
   const typeName={income:'수입',expense:'지출',transfer:'이체',cardpay:'카드대금'};
   // 1) 거래내역 sheet
@@ -1069,11 +1093,31 @@ function exportExcel(){
     '차감/연결계좌':isCredit(c)?(c.assetId?(assetById(c.assetId)?.name||''):'연결안함'):(assetById(c.assetId)?.name||''),
     '미결제':isCredit(c)?liabBalance(c.liabId):''
   }));
+  // 5) 분류체계 sheet — preserve the full 대>중>소 category tree (both 지출/수입)
+  const catRows=[];
+  ['expense','income'].forEach(tp=>{
+    const tpName=tp==='expense'?'지출':'수입';
+    (state.cats?.[tp]||[]).forEach(big=>{
+      if(!big.children||!big.children.length){ catRows.push({'구분':tpName,'대분류':big.name,'중분류':'','소분류':''}); return; }
+      big.children.forEach(mid=>{
+        if(!mid.children||!mid.children.length){ catRows.push({'구분':tpName,'대분류':big.name,'중분류':mid.name,'소분류':''}); return; }
+        mid.children.forEach(sub=>{ catRows.push({'구분':tpName,'대분류':big.name,'중분류':mid.name,'소분류':sub.name}); });
+      });
+    });
+  });
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows.length?txRows:[{'날짜':'','구분':'','금액':''}]), '거래내역');
+  // set column widths for the tx sheet so categories read clearly
+  const txWs=XLSX.utils.json_to_sheet(txRows.length?txRows:[{'날짜':'','구분':'','금액':'','대분류':'','중분류':'','소분류':'','거래처':'','출처/입금':'','내용':''}]);
+  txWs['!cols']=[{wch:11},{wch:8},{wch:12},{wch:12},{wch:12},{wch:12},{wch:14},{wch:18},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, txWs, '거래내역');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(asRows.length?asRows:[{'자산':'','잔액':''}]), '자산');
   if(liRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(liRows), '부채');
   if(cdRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cdRows), '카드');
+  if(catRows.length){
+    const catWs=XLSX.utils.json_to_sheet(catRows);
+    catWs['!cols']=[{wch:8},{wch:14},{wch:14},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, catWs, '분류체계');
+  }
   const today=new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb, `가계부_${today}.xlsx`);
 }
@@ -1366,8 +1410,19 @@ function render(){
 
 /* render assets + liabilities + cards management */
 function renderAssets(){
+  // NET WORTH = total assets - total liabilities
+  const totalAssets=state.assets.reduce((s,a)=>s+assetBalance(a.id),0);
+  const totalLiab=(state.liabilities||[]).reduce((s,l)=>s+liabBalance(l.id),0);
+  const net=totalAssets-totalLiab;
+  $('networth').innerHTML=`
+    <div class="nw-main"><span class="nw-label">순자산 (자산 − 부채)</span>
+      <span class="nw-amt ${net<0?'neg':''}">${won(net)}</span></div>
+    <div class="nw-break">
+      <div><div class="k">자산</div><div class="v">${won(totalAssets)}</div></div>
+      <div><div class="k">부채</div><div class="v" style="color:#ff9b8f">${won(totalLiab)}</div></div>
+    </div>`;
   // ASSETS
-  const total=state.assets.reduce((s,a)=>s+assetBalance(a.id),0);
+  const total=totalAssets;
   $('assetTotal').textContent='총 '+won(total);
   $('assetlist').innerHTML = `<div class="assethead"><span>자산</span><span>잔액</span></div>` +
     state.assets.map(a=>{
@@ -1446,11 +1501,33 @@ function renderAssets(){
 
 /* 분류별 차트: aggregate by chosen level over the chosen period window */
 function renderChart(){
-  $('chartTypeToggle').textContent = chartType==='expense'?'지출 ▸ 수입 보기':'수입 ▸ 지출 보기';
   applyChartControls();
+  if(chartType==='asset'){ renderAssetChart(); return; }
   if(chartViewMode==='trend'){ renderTrend(); return; }
   if(chartViewMode==='drill'){ renderDrill(); return; }
   renderShare();
+}
+
+// ----- 자산별 그래프 (snapshot pie of current balances) -----
+function renderAssetChart(){
+  const data=state.assets.map((a,i)=>({name:a.name, value:assetBalance(a.id), color:COLORS[i%COLORS.length]}))
+    .filter(d=>d.value>0) // pie only shows positive balances
+    .sort((a,b)=>b.value-a.value);
+  const totalAll=state.assets.reduce((s,a)=>s+assetBalance(a.id),0);
+  const totalLiab=(state.liabilities||[]).reduce((s,l)=>s+liabBalance(l.id),0);
+  const net=totalAll-totalLiab;
+  if(!data.length){
+    $('chart').innerHTML=`<div class="empty">표시할 자산 잔액이 없습니다.<br>자산 탭에서 잔액을 입력해 보세요.</div>`;
+    return;
+  }
+  let html=donutSVG(data)+legendHTML(data,false);
+  // include liabilities + net worth as a small summary under the pie
+  html+=`<div class="nums" style="margin-top:10px;font-size:13px">
+    <div class="legrow"><span class="legname">자산 합계</span><span class="legval">${won(totalAll)}</span></div>
+    <div class="legrow"><span class="legname">부채 합계</span><span class="legval" style="color:var(--coral)">${won(totalLiab)}</span></div>
+    <div class="legrow"><span class="legname" style="font-weight:800">순자산</span><span class="legval" style="font-weight:800;color:${net<0?'var(--coral)':'var(--ink)'}">${won(net)}</span></div>
+  </div>`;
+  $('chart').innerHTML=html;
 }
 
 // ----- helpers -----
