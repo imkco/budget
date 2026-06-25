@@ -126,6 +126,21 @@
   .lvl2 .nm::before{content:'└ ';color:var(--rule)}
   .childwrap{display:none}
   .childwrap.open{display:block}
+  /* assets */
+  .asrow{display:flex;align-items:center;gap:10px;padding:12px 6px;border-bottom:1px solid var(--rule)}
+  .asrow:last-child{border-bottom:none}
+  .asrow .anm{font-weight:700;font-size:15px;flex:none;min-width:64px}
+  .asrow .abal{flex:1;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;font-size:16px}
+  .asrow .abal.neg{color:var(--coral)}
+  .asrow .aedit{flex:none}
+  .asrow .aedit input{width:120px;text-align:right;padding:6px 8px;font-size:14px}
+  .asrow .acts{display:flex;gap:5px;flex:none}
+  .asrow .acts button{border:1px solid var(--rule);background:#fff;border-radius:7px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;color:var(--ink)}
+  .asrow .acts button:hover{background:var(--paper)}
+  .asrow .acts button.danger:hover{background:var(--coral-soft);color:var(--coral);border-color:var(--coral)}
+  .asrow .acts button.save{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .asrow .sub2{font-size:11px;color:var(--muted);margin-top:2px}
+  .assethead{display:flex;justify-content:space-between;align-items:baseline;padding:10px 6px;border-bottom:2px solid var(--ink);font-size:12px;color:var(--muted);font-weight:700}
   /* drill-down category manager */
   .catcrumb{display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:13px;margin-bottom:12px;color:var(--muted)}
   .catcrumb .seg-c{display:inline-flex;align-items:center;gap:4px}
@@ -196,6 +211,11 @@
       <select id="sub"></select>
       <label class="fld">소분류 (선택)</label>
       <select id="sub2"></select>
+      <label class="fld" id="payeeLabel">거래처 (선택)</label>
+      <input type="text" id="payee" list="payeeList" placeholder="예: 스타벅스" autocomplete="off">
+      <datalist id="payeeList"></datalist>
+      <label class="fld" id="acctLabel">출처 (선택)</label>
+      <select id="acct"></select>
       <label class="fld">내용 (선택)</label>
       <input type="text" id="memo" placeholder="예: 점심 식사">
       <label class="fld">날짜</label>
@@ -206,7 +226,9 @@
     <div>
       <div class="tabs">
         <button class="on" data-tab="list">내역</button>
+        <button data-tab="assets">자산</button>
         <button data-tab="chart">분류별 차트</button>
+        <button data-tab="payeestat">거래처별</button>
         <button data-tab="budget">예산</button>
         <button data-tab="recur">반복 항목</button>
         <button data-tab="cats">분류 관리</button>
@@ -217,9 +239,36 @@
         <div id="txlist"></div>
       </div>
 
+      <div class="panel" id="tab-assets" style="display:none">
+        <h2>자산 <span class="mini" id="assetTotal"></span></h2>
+        <div id="assetlist"></div>
+        <div style="margin-top:14px;border-top:1px solid var(--rule);padding-top:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px">자산 추가</div>
+          <div class="setrow" style="margin-top:0">
+            <input type="text" id="newAsset" placeholder="자산 이름 (예: 비상금, 적금)">
+            <input type="number" id="newAssetBal" placeholder="현재 잔액" inputmode="numeric" style="max-width:130px">
+            <button id="assetAdd">추가</button>
+          </div>
+        </div>
+        <div style="margin-top:16px;border-top:1px solid var(--rule);padding-top:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px">카드 관리 <span style="font-weight:400;color:var(--muted)">— 카드 지출은 연결된 자산에서 차감됩니다</span></div>
+          <div id="cardlist"></div>
+          <div class="setrow">
+            <input type="text" id="newCard" placeholder="카드 이름 (예: 신한카드)">
+            <select id="newCardAsset"></select>
+            <button id="cardAdd">추가</button>
+          </div>
+        </div>
+      </div>
+
       <div class="panel" id="tab-chart" style="display:none">
         <h2>분류별 지출</h2>
         <div id="chart"></div>
+      </div>
+
+      <div class="panel" id="tab-payeestat" style="display:none">
+        <h2>거래처별 집계 <span class="mini" id="payeeStatToggle">지출 ↔ 수입</span></h2>
+        <div id="payeechart"></div>
       </div>
 
       <div class="panel" id="tab-budget" style="display:none">
@@ -251,6 +300,12 @@
           </div>
           <div class="setrow">
             <input type="text" id="rMemo" placeholder="내용 (예: 월세, 통신비)">
+          </div>
+          <div class="setrow">
+            <input type="text" id="rPayee" placeholder="거래처/수입처 (선택)">
+          </div>
+          <div class="setrow">
+            <select id="rAcct"></select>
           </div>
           <div class="setrow">
             <select id="rMode">
@@ -316,6 +371,8 @@ let cur = new Date(); cur.setDate(1);
 let type='expense', tab='list', rType='expense', cType='expense';
 let treeOpen={}; // (legacy, unused)
 let catNav={big:null, mid:null}; // drill-down position in 분류 관리
+let payeeStatType='expense'; // which side the 거래처별 tab shows
+let editingAsset=null; // asset id currently being balance-edited
 
 /* ---- tree helpers ---- */
 function findBig(tType,name){ return state.cats[tType].find(b=>b.name===name); }
@@ -324,6 +381,51 @@ function bigNames(tType){ return state.cats[tType].map(b=>b.name); }
 function midNames(tType,big){ const b=findBig(tType,big); return b?b.children.map(m=>m.name):[]; }
 function subNames(tType,big,mid){ const b=findBig(tType,big); const m=b&&findMid(b,mid); return m?m.children.map(s=>s.name):[]; }
 
+/* ---- asset / payment-source helpers ----
+   tx.acct holds the payment source / deposit target:
+     'asset:<id>'  → directly affects that asset
+     'card:<id>'   → affects the asset the card is linked to
+   Income with acct adds to the asset; expense subtracts.
+*/
+function assetById(id){ return state.assets.find(a=>a.id===id); }
+function cardById(id){ return state.cards.find(c=>c.id===id); }
+function uid(p){ return p+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+// resolve a tx.acct string to the affected asset id (cards resolve to their linked asset)
+function acctToAssetId(acct){
+  if(!acct) return null;
+  if(acct.startsWith('asset:')) return acct.slice(6);
+  if(acct.startsWith('card:')){ const c=cardById(acct.slice(5)); return c?c.assetId:null; }
+  return null;
+}
+// current balance of an asset = opening +incomes -expenses routed to it
+function assetBalance(id){
+  const a=assetById(id); if(!a) return 0;
+  let bal=a.opening||0;
+  state.tx.forEach(t=>{
+    const aid=acctToAssetId(t.acct);
+    if(aid!==id) return;
+    bal += t.type==='income'? t.amt : -t.amt;
+  });
+  return bal;
+}
+// options for the 출처/입금 select, given type
+function acctOptions(forType){
+  // assets first, then cards (cards only make sense for expense, but allow both)
+  let html='<option value="">— 미지정 —</option>';
+  html+='<optgroup label="자산">'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('')+'</optgroup>';
+  if(state.cards.length && forType==='expense'){
+    html+='<optgroup label="카드">'+state.cards.map(c=>{const a=assetById(c.assetId);return `<option value="card:${c.id}">${esc(c.name)}${a?` (${esc(a.name)})`:''}</option>`;}).join('')+'</optgroup>';
+  }
+  return html;
+}
+// short display label for a tx.acct value
+function acctLabel(acct){
+  if(!acct) return '';
+  if(acct.startsWith('asset:')){ const a=assetById(acct.slice(6)); return a?esc(a.name):''; }
+  if(acct.startsWith('card:')){ const c=cardById(acct.slice(5)); if(!c)return ''; const a=assetById(c.assetId); return esc(c.name)+(a?` › ${esc(a.name)}`:''); }
+  return '';
+}
+
 function load(){
   let d;
   try{ d = JSON.parse(localStorage.getItem('budgetData')) || {}; }catch(e){ d={}; }
@@ -331,6 +433,14 @@ function load(){
   if(!d.budgets) d.budgets={};
   if(!d.recur) d.recur=[];
   if(!d.recurLog) d.recurLog={};
+  if(!d.assets){
+    // default assets: 현금, 통장
+    d.assets=[{id:'a_cash',name:'현금',opening:0},{id:'a_bank',name:'통장',opening:0}];
+  }
+  if(!d.cards){
+    // default a card linked to 통장
+    d.cards=[{id:'c_main',name:'카드',assetId:'a_bank'}];
+  }
   d = migrateCats(d);
   return d;
 }
@@ -391,13 +501,33 @@ function syncInputSub2(){
 }
 $('cat').onchange=syncInputSubs;
 $('sub').onchange=syncInputSub2;
+// distinct payees seen so far, for autocomplete (per type)
+function payeesFor(tp){
+  const set=new Set();
+  state.tx.forEach(t=>{ if(t.type===tp && t.payee) set.add(t.payee); });
+  state.recur.forEach(r=>{ if(r.type===tp && r.payee) set.add(r.payee); });
+  return [...set].sort((a,b)=>a.localeCompare(b,'ko'));
+}
+function refreshPayeeList(){
+  $('payeeLabel').textContent = (type==='expense'?'거래처':'수입처')+' (선택)';
+  $('payee').placeholder = type==='expense'?'예: 스타벅스':'예: 회사 급여';
+  $('payeeList').innerHTML = payeesFor(type).map(p=>`<option value="${esc(p)}"></option>`).join('');
+  refreshAcct();
+}
+function refreshAcct(){
+  $('acctLabel').textContent = (type==='expense'?'출처':'입금 자산')+' (선택)';
+  const prev=$('acct').value;
+  $('acct').innerHTML = acctOptions(type);
+  // keep selection if still valid
+  if(prev && [...$('acct').options].some(o=>o.value===prev)) $('acct').value=prev;
+}
 $('seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;type=b.dataset.t;
-  [...$('seg').children].forEach(x=>x.className='');b.className='on '+(type==='expense'?'exp':'inc');fillCats();};
+  [...$('seg').children].forEach(x=>x.className='');b.className='on '+(type==='expense'?'exp':'inc');fillCats();refreshPayeeList();};
 $('add').onclick=()=>{
   const amt=parseFloat($('amt').value);
   if(!amt||amt<=0){$('amt').focus();return;}
-  state.tx.push({id:Date.now(),type,amt,cat:$('cat').value,sub:$('sub').value||'',sub2:$('sub2').value||'',memo:$('memo').value.trim(),date:$('date').value});
-  save();$('amt').value='';$('memo').value='';render();
+  state.tx.push({id:Date.now(),type,amt,cat:$('cat').value,sub:$('sub').value||'',sub2:$('sub2').value||'',payee:$('payee').value.trim(),acct:$('acct').value||'',memo:$('memo').value.trim(),date:$('date').value});
+  save();$('amt').value='';$('payee').value='';$('memo').value='';refreshPayeeList();render();
 };
 
 /* ---------- month nav ---------- */
@@ -407,11 +537,12 @@ $('next').onclick=()=>{cur.setMonth(cur.getMonth()+1);render();checkRecur();};
 /* ---------- tabs ---------- */
 document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
-  ['list','chart','budget','recur','cats'].forEach(t=>$('tab-'+t).style.display=t===tab?'':'none');};
+  ['list','assets','chart','payeestat','budget','recur','cats'].forEach(t=>$('tab-'+t).style.display=t===tab?'':'none');};
 
 /* ---------- recurring: type segment + cascading cats ---------- */
 function fillRCats(){
   $('rCat').innerHTML=opt(bigNames(rType),null);
+  $('rAcct').innerHTML=acctOptions(rType);
   syncRSubs();
 }
 function syncRSubs(){
@@ -436,8 +567,8 @@ $('rAdd').onclick=()=>{
   if(!memo){$('rMemo').focus();return;}
   if(!day||day<1||day>31){alert('실행일을 1~31 사이로 입력하세요.');$('rDay').focus();return;}
   if(mode==='fixed' && (!amt||amt<=0)){alert('고정 금액 항목은 금액을 입력해야 합니다.');$('rAmt').focus();return;}
-  state.recur.push({id:Date.now(),type:rType,cat:$('rCat').value,sub:$('rSub').value||'',sub2:$('rSub2').value||'',memo,mode,amt:amt||0,day});
-  save();$('rMemo').value='';$('rAmt').value='';$('rDay').value='';render();checkRecur();
+  state.recur.push({id:Date.now(),type:rType,cat:$('rCat').value,sub:$('rSub').value||'',sub2:$('rSub2').value||'',payee:$('rPayee').value.trim(),acct:$('rAcct').value||'',memo,mode,amt:amt||0,day});
+  save();$('rMemo').value='';$('rPayee').value='';$('rAmt').value='';$('rDay').value='';render();checkRecur();
 };
 
 /* ---------- category management (drill-down) ---------- */
@@ -589,6 +720,85 @@ function finishCat(){ save();render();fillCats();fillRCats(); }
 $('budSave').onclick=()=>{const v=parseFloat($('budAmt').value);if(!v||v<=0){$('budAmt').focus();return;}
   state.budgets[$('budCat').value]=v;save();$('budAmt').value='';render();};
 
+/* ---------- 거래처별 집계 toggle ---------- */
+$('payeeStatToggle').onclick=()=>{ payeeStatType = payeeStatType==='expense'?'income':'expense'; renderPayeeStat(); };
+
+/* ---------- assets & cards ---------- */
+$('assetAdd').onclick=()=>{
+  const name=$('newAsset').value.trim();
+  const bal=parseFloat($('newAssetBal').value)||0;
+  if(!name){$('newAsset').focus();return;}
+  if(state.assets.some(a=>a.name===name)){alert('이미 있는 자산 이름입니다.');return;}
+  state.assets.push({id:uid('a'),name,opening:bal});
+  save();$('newAsset').value='';$('newAssetBal').value='';render();refreshAcct();
+};
+$('cardAdd').onclick=()=>{
+  const name=$('newCard').value.trim();
+  const assetId=$('newCardAsset').value;
+  if(!name){$('newCard').focus();return;}
+  if(!assetId){alert('카드와 연결할 자산을 선택하세요.');return;}
+  if(state.cards.some(c=>c.name===name)){alert('이미 있는 카드 이름입니다.');return;}
+  state.cards.push({id:uid('c'),name,assetId});
+  save();$('newCard').value='';render();refreshAcct();
+};
+
+/* delegated clicks for asset/card rows */
+document.body.addEventListener('click',e=>{
+  // edit balance (opening adjust so that displayed balance becomes the typed value)
+  const ab=e.target.closest('.asset-editbtn');
+  if(ab){ assetStartEdit(ab.dataset.id); return; }
+  const asv=e.target.closest('.asset-savebtn');
+  if(asv){ assetSaveEdit(asv.dataset.id); return; }
+  const acn=e.target.closest('.asset-cancelbtn');
+  if(acn){ render(); return; }
+  const arn=e.target.closest('.asset-renamebtn');
+  if(arn){ assetRename(arn.dataset.id); return; }
+  const adl=e.target.closest('.asset-delbtn');
+  if(adl){ assetDelete(adl.dataset.id); return; }
+  const cdl=e.target.closest('.card-delbtn');
+  if(cdl){ cardDelete(cdl.dataset.id); return; }
+});
+
+function assetStartEdit(id){ editingAsset=id; renderAssets(); 
+  const inp=document.querySelector(`.asset-balinput[data-id="${id}"]`); if(inp){inp.focus();inp.select();} }
+function assetSaveEdit(id){
+  const inp=document.querySelector(`.asset-balinput[data-id="${id}"]`);
+  if(!inp) return;
+  const target=parseFloat(inp.value);
+  if(isNaN(target)){alert('숫자를 입력하세요.');return;}
+  const a=assetById(id);
+  // adjust opening so that current computed balance equals the typed target
+  const movements=assetBalance(id)-(a.opening||0); // = incomes - expenses routed here
+  a.opening = target - movements;
+  editingAsset=null;
+  save();render();
+}
+function assetRename(id){
+  const a=assetById(id);
+  const nn=(prompt(`'${a.name}' 자산의 새 이름`,a.name)||'').trim();
+  if(!nn||nn===a.name)return;
+  if(state.assets.some(x=>x.name===nn)){alert('이미 있는 이름입니다.');return;}
+  a.name=nn;save();render();refreshAcct();
+}
+function assetDelete(id){
+  // block if any tx routes to it (directly or via a card), or any card links to it
+  const used=state.tx.filter(t=>acctToAssetId(t.acct)===id).length;
+  const cardLinked=state.cards.filter(c=>c.assetId===id).length;
+  if(used>0){alert('이 자산에 연결된 거래가 '+used+'건 있어 삭제할 수 없습니다.\n해당 거래의 출처를 바꾸거나 삭제한 뒤 다시 시도하세요.');return;}
+  if(cardLinked>0){alert('이 자산에 연결된 카드가 있습니다. 카드를 먼저 삭제하거나 다른 자산에 연결하세요.');return;}
+  if(state.assets.length<=1){alert('자산은 최소 1개 있어야 합니다.');return;}
+  const a=assetById(id);
+  if(!confirm(`'${a.name}' 자산을 삭제할까요?`))return;
+  state.assets=state.assets.filter(x=>x.id!==id);save();render();refreshAcct();
+}
+function cardDelete(id){
+  const used=state.tx.filter(t=>t.acct===('card:'+id)).length;
+  if(used>0){alert('이 카드로 기록된 거래가 '+used+'건 있어 삭제할 수 없습니다.');return;}
+  const c=cardById(id);
+  if(!confirm(`'${c.name}' 카드를 삭제할까요?`))return;
+  state.cards=state.cards.filter(x=>x.id!==id);save();render();refreshAcct();
+}
+
 /* ---------- recurring execution ----------
    For each recur item, for the currently-viewed month:
    - key = id + '-' + mkey(cur)
@@ -606,7 +816,7 @@ function checkRecur(){
     const day=clampDay(r.day,y,m);
     const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
     if(r.mode==='fixed'){
-      state.tx.push({id:Date.now()+Math.random(),type:r.type,amt:r.amt,cat:r.cat,sub:r.sub||'',sub2:r.sub2||'',memo:r.memo,date,recurId:r.id});
+      state.tx.push({id:Date.now()+Math.random(),type:r.type,amt:r.amt,cat:r.cat,sub:r.sub||'',sub2:r.sub2||'',payee:r.payee||'',acct:r.acct||'',memo:r.memo,date,recurId:r.id});
       state.recurLog[key]='done';changed=true;
     }else{
       asks.push({r,date,key});
@@ -640,7 +850,7 @@ function askModal(asks){
       const val=parseFloat($('askitems').querySelector(`[data-i="${i}"]`).value);
       if(skip){state.recurLog[a.key]='skipped';return;}
       if(val&&val>0){
-        state.tx.push({id:Date.now()+Math.random(),type:a.r.type,amt:val,cat:a.r.cat,sub:a.r.sub||'',sub2:a.r.sub2||'',memo:a.r.memo,date:a.date,recurId:a.r.id});
+        state.tx.push({id:Date.now()+Math.random(),type:a.r.type,amt:val,cat:a.r.cat,sub:a.r.sub||'',sub2:a.r.sub2||'',payee:a.r.payee||'',acct:a.r.acct||'',memo:a.r.memo,date:a.date,recurId:a.r.id});
         state.recurLog[a.key]='done';
       } // if no value and not skipped → leave unlogged, ask again later
     });
@@ -661,9 +871,11 @@ function render(){
     const sign=t.type==='income'?'+':'−';
     const rec=t.recurId?'<span class="badge">반복</span>':'';
     const path=[t.cat,t.sub,t.sub2].filter(Boolean).map(esc).join(' › ');
+    const payeeTxt=t.payee?` <span style="font-weight:700;color:${c}">@${esc(t.payee)}</span>`:'';
+    const acctTxt=acctLabel(t.acct);
     return `<div class="tx"><span class="dot" style="background:${c}"></span>
-      <div class="meta"><div class="cat">${path}${rec}${t.memo?` <span style="font-weight:400;color:var(--muted)">· ${esc(t.memo)}</span>`:''}</div>
-      <div class="sub">${t.date}</div></div>
+      <div class="meta"><div class="cat">${path}${payeeTxt}${rec}${t.memo?` <span style="font-weight:400;color:var(--muted)">· ${esc(t.memo)}</span>`:''}</div>
+      <div class="sub">${t.date}${acctTxt?` · ${acctTxt}`:''}</div></div>
       <div class="val" style="color:${c}">${sign}${won(t.amt)}</div>
       <button class="del" data-id="${t.id}">✕</button></div>`;
   }).join(''):'<div class="empty">아직 내역이 없습니다.<br>왼쪽에서 첫 기록을 추가해 보세요.</div>';
@@ -696,13 +908,80 @@ function render(){
     const st=status==='done'?'<span class="pill ok">집행됨</span>':status==='skipped'?'<span class="pill warn">건너뜀</span>':'<span class="pill" style="background:var(--paper);color:var(--muted)">대기</span>';
     const modeTxt=r.mode==='fixed'?`고정 ${won(r.amt)}`:'변동(매월 질문)';
     const path=[r.cat,r.sub,r.sub2].filter(Boolean).map(esc).join(' › ');
+    const rpay=r.payee?` · @${esc(r.payee)}`:'';
     return `<div class="budrow"><div class="top"><div class="left"><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c}"></span>${esc(r.memo)} ${st}</div>
       <button class="recurdel" data-id="${r.id}" style="border:none;background:none;color:var(--muted);cursor:pointer">✕</button></div>
-      <div class="nums">매월 ${r.day}일 · ${path} · ${r.type==='income'?'수입':'지출'} · ${modeTxt}</div></div>`;
+      <div class="nums">매월 ${r.day}일 · ${path}${rpay} · ${r.type==='income'?'수입':'지출'} · ${modeTxt}</div></div>`;
   }).join(''):'<div class="empty">등록된 반복 항목이 없습니다.</div>';
 
   // category manager (drill-down)
   renderCatManager();
+
+  // 거래처별 집계
+  renderPayeeStat();
+  // 자산
+  renderAssets();
+  // keep autocomplete fresh
+  refreshPayeeList();
+}
+
+/* render assets + cards management */
+function renderAssets(){
+  const total=state.assets.reduce((s,a)=>s+assetBalance(a.id),0);
+  $('assetTotal').textContent='총 '+won(total);
+  $('assetlist').innerHTML = `<div class="assethead"><span>자산</span><span>잔액</span></div>` +
+    state.assets.map(a=>{
+      const bal=assetBalance(a.id);
+      const editing = editingAsset===a.id;
+      const linkedCards=state.cards.filter(c=>c.assetId===a.id).map(c=>c.name);
+      const sub = linkedCards.length?`<div class="sub2">연결 카드: ${linkedCards.map(esc).join(', ')}</div>`:'';
+      if(editing){
+        return `<div class="asrow">
+          <div style="flex:1"><span class="anm">${esc(a.name)}</span>${sub}</div>
+          <div class="aedit"><input class="asset-balinput" data-id="${a.id}" type="number" inputmode="numeric" value="${bal}"></div>
+          <div class="acts"><button class="save asset-savebtn" data-id="${a.id}">저장</button>
+            <button class="asset-cancelbtn">취소</button></div>
+        </div>`;
+      }
+      return `<div class="asrow">
+        <div style="flex:1"><span class="anm">${esc(a.name)}</span>${sub}</div>
+        <div class="abal ${bal<0?'neg':''}">${won(bal)}</div>
+        <div class="acts">
+          <button class="asset-editbtn" data-id="${a.id}">잔액수정</button>
+          <button class="asset-renamebtn" data-id="${a.id}">이름</button>
+          <button class="danger asset-delbtn" data-id="${a.id}">삭제</button>
+        </div>
+      </div>`;
+    }).join('');
+
+  // card section
+  $('newCardAsset').innerHTML = '<option value="">연결 자산 선택</option>'+state.assets.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  $('cardlist').innerHTML = state.cards.length? state.cards.map(c=>{
+    const a=assetById(c.assetId);
+    return `<div class="asrow">
+      <div style="flex:1"><span class="anm">${esc(c.name)}</span><div class="sub2">차감 자산: ${a?esc(a.name):'(삭제된 자산)'}</div></div>
+      <div class="acts"><button class="danger card-delbtn" data-id="${c.id}">삭제</button></div>
+    </div>`;
+  }).join('') : '<div class="empty" style="padding:16px 0">등록된 카드가 없습니다.</div>';
+}
+
+/* 거래처별 집계: this month, by payee, for the toggled type */
+function renderPayeeStat(){
+  const tp=payeeStatType;
+  $('payeeStatToggle').textContent = tp==='expense'?'지출 ▸ 수입 보기':'수입 ▸ 지출 보기';
+  const rows=state.tx.filter(t=>inMonth(t)&&t.type===tp);
+  const byP={};
+  rows.forEach(t=>{ const k=t.payee&&t.payee.trim()?t.payee:'(미지정)'; byP[k]=(byP[k]||0)+t.amt; });
+  const ents=Object.entries(byP).sort((a,b)=>b[1]-a[1]);
+  const total=ents.reduce((s,[,v])=>s+v,0);
+  const max=ents.length?ents[0][1]:1;
+  const accent=tp==='expense'?'var(--coral)':'var(--teal)';
+  const noun=tp==='expense'?'거래처':'수입처';
+  if(!ents.length){ $('payeechart').innerHTML=`<div class="empty">이번 달 ${tp==='expense'?'지출':'수입'} 내역이 없습니다.</div>`; return; }
+  $('payeechart').innerHTML=ents.map(([p,v],i)=>`
+    <div class="barrow"><div class="top"><b>${esc(p)}</b><span class="n">${won(v)} · ${Math.round(v/total*100)}%</span></div>
+    <div class="track"><div class="fill" style="width:${v/max*100}%;background:${accent}"></div></div></div>`).join('')
+    + `<div class="nums" style="margin-top:6px;color:var(--muted);font-size:12px">${noun} ${ents.length}곳 · 합계 ${won(total)}</div>`;
 }
 
 /* drill-down 분류 관리: breadcrumb + current-level list + add box */
@@ -881,6 +1160,8 @@ async function restoreDrive(){
 function ensureShape(){
   if(!state.recur)state.recur=[];if(!state.recurLog)state.recurLog={};
   if(!state.budgets)state.budgets={};if(!state.tx)state.tx=[];
+  if(!state.assets)state.assets=[{id:'a_cash',name:'현금',opening:0},{id:'a_bank',name:'통장',opening:0}];
+  if(!state.cards)state.cards=[];
   state=migrateCats(state); // normalize categories to 대/중/소 tree
 }
 function save_local(){ localStorage.setItem('budgetData',JSON.stringify(state)); }
@@ -924,7 +1205,7 @@ window.addEventListener('beforeunload',e=>{ if(driveHandle&&driveDirty){ writeTo
 $('date').value=new Date().toISOString().slice(0,10);
 fillCats();
 fillRCats();
-
+refreshPayeeList();
 render();
 checkRecur();
 restoreDrive();
