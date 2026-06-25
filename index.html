@@ -41,6 +41,9 @@
   .seg button{flex:1;border:none;background:none;padding:9px;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer;color:var(--muted)}
   .seg button.on.exp{background:var(--coral);color:#fff}
   .seg button.on.inc{background:var(--teal);color:#fff}
+  .seg button.on.mov{background:var(--ink);color:#fff}
+  .seg.seg4 button{font-size:13px;padding:8px 4px}
+  .tx .dot.mov{background:var(--ink)!important}
   label.fld{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:12px 0 5px}
   input,select{width:100%;padding:10px 12px;border:1px solid var(--rule);border-radius:9px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
   input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px;border-color:var(--teal)}
@@ -199,23 +202,38 @@
   <div class="grid2">
     <div class="panel">
       <h2>입력</h2>
-      <div class="seg" id="seg">
+      <div class="seg seg4" id="seg">
         <button class="on exp" data-t="expense">지출</button>
         <button data-t="income">수입</button>
+        <button data-t="transfer">이체</button>
+        <button data-t="cardpay">카드대금</button>
       </div>
       <label class="fld">금액</label>
       <input type="number" id="amt" placeholder="0" inputmode="numeric">
-      <label class="fld">대분류</label>
-      <select id="cat"></select>
-      <label class="fld">중분류 (선택)</label>
-      <select id="sub"></select>
-      <label class="fld">소분류 (선택)</label>
-      <select id="sub2"></select>
-      <label class="fld" id="payeeLabel">거래처 (선택)</label>
-      <input type="text" id="payee" list="payeeList" placeholder="예: 스타벅스" autocomplete="off">
-      <datalist id="payeeList"></datalist>
-      <label class="fld" id="acctLabel">출처 (선택)</label>
-      <select id="acct"></select>
+
+      <!-- income/expense fields -->
+      <div id="ieFields">
+        <label class="fld">대분류</label>
+        <select id="cat"></select>
+        <label class="fld">중분류 (선택)</label>
+        <select id="sub"></select>
+        <label class="fld">소분류 (선택)</label>
+        <select id="sub2"></select>
+        <label class="fld" id="payeeLabel">거래처 (선택)</label>
+        <input type="text" id="payee" list="payeeList" placeholder="예: 스타벅스" autocomplete="off">
+        <datalist id="payeeList"></datalist>
+        <label class="fld" id="acctLabel">출처 (선택)</label>
+        <select id="acct"></select>
+      </div>
+
+      <!-- transfer / cardpay fields -->
+      <div id="moveFields" style="display:none">
+        <label class="fld" id="fromLabel">출금</label>
+        <select id="fromSel"></select>
+        <label class="fld" id="toLabel">입금</label>
+        <select id="toSel"></select>
+      </div>
+
       <label class="fld">내용 (선택)</label>
       <input type="text" id="memo" placeholder="예: 점심 식사">
       <label class="fld">날짜</label>
@@ -250,12 +268,30 @@
             <button id="assetAdd">추가</button>
           </div>
         </div>
-        <div style="margin-top:16px;border-top:1px solid var(--rule);padding-top:14px">
-          <div style="font-weight:700;font-size:13px;margin-bottom:8px">카드 관리 <span style="font-weight:400;color:var(--muted)">— 카드 지출은 연결된 자산에서 차감됩니다</span></div>
+
+        <h2 style="margin-top:22px">부채 <span class="mini" id="liabTotal"></span></h2>
+        <div id="liablist"></div>
+        <div style="margin-top:14px;border-top:1px solid var(--rule);padding-top:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px">부채 추가 <span style="font-weight:400;color:var(--muted)">— 신용카드 부채는 카드 등록 시 자동 생성됩니다</span></div>
+          <div class="setrow" style="margin-top:0">
+            <input type="text" id="newLiab" placeholder="부채 이름 (예: 마이너스통장, 대출)">
+            <input type="number" id="newLiabBal" placeholder="현재 잔액" inputmode="numeric" style="max-width:130px">
+            <button id="liabAdd">추가</button>
+          </div>
+        </div>
+
+        <div style="margin-top:22px;border-top:1px solid var(--rule);padding-top:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px">카드 관리 <span style="font-weight:400;color:var(--muted)">— 체크카드는 통장에서 즉시 차감, 신용카드는 부채에 누적</span></div>
           <div id="cardlist"></div>
           <div class="setrow">
             <input type="text" id="newCard" placeholder="카드 이름 (예: 신한카드)">
-            <select id="newCardAsset"></select>
+            <select id="newCardKind">
+              <option value="check">체크카드</option>
+              <option value="credit">신용카드</option>
+            </select>
+          </div>
+          <div class="setrow" style="margin-top:8px">
+            <select id="newCardLink"></select>
             <button id="cardAdd">추가</button>
           </div>
         </div>
@@ -373,6 +409,7 @@ let treeOpen={}; // (legacy, unused)
 let catNav={big:null, mid:null}; // drill-down position in 분류 관리
 let payeeStatType='expense'; // which side the 거래처별 tab shows
 let editingAsset=null; // asset id currently being balance-edited
+let editingLiab=null; // liability id currently being balance-edited
 
 /* ---- tree helpers ---- */
 function findBig(tType,name){ return state.cats[tType].find(b=>b.name===name); }
@@ -381,48 +418,111 @@ function bigNames(tType){ return state.cats[tType].map(b=>b.name); }
 function midNames(tType,big){ const b=findBig(tType,big); return b?b.children.map(m=>m.name):[]; }
 function subNames(tType,big,mid){ const b=findBig(tType,big); const m=b&&findMid(b,mid); return m?m.children.map(s=>s.name):[]; }
 
-/* ---- asset / payment-source helpers ----
-   tx.acct holds the payment source / deposit target:
-     'asset:<id>'  → directly affects that asset
-     'card:<id>'   → affects the asset the card is linked to
-   Income with acct adds to the asset; expense subtracts.
+/* ---- account model (assets, liabilities, cards) ----
+   tx.type: 'income' | 'expense' | 'transfer' | 'cardpay'
+   For income/expense: tx.acct = payment source / deposit target
+     'asset:<id>'        → directly affects that asset (income +, expense -)
+     'card:<id>'         → check card: subtract linked asset (expense)
+                           credit card: add to linked liability, asset untouched
+   For transfer:  tx.from, tx.to  (each 'asset:<id>' or 'liab:<id>'); out from→, into to←
+   For cardpay:   tx.from = paying asset ('asset:<id>'), tx.to = card/liability being paid
+                  ('card:<id>' or 'liab:<id>'); subtracts asset, reduces liability.
 */
 function assetById(id){ return state.assets.find(a=>a.id===id); }
+function liabById(id){ return (state.liabilities||[]).find(l=>l.id===id); }
 function cardById(id){ return state.cards.find(c=>c.id===id); }
 function uid(p){ return p+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
-// resolve a tx.acct string to the affected asset id (cards resolve to their linked asset)
-function acctToAssetId(acct){
-  if(!acct) return null;
-  if(acct.startsWith('asset:')) return acct.slice(6);
-  if(acct.startsWith('card:')){ const c=cardById(acct.slice(5)); return c?c.assetId:null; }
-  return null;
+function isCredit(c){ return c && c.kind==='credit'; }
+// the liability id a credit card accrues into
+function cardLiabId(card){ return isCredit(card)? card.liabId : ''; }
+
+// effect of a single tx on a given asset id (signed)
+function txAssetDelta(t,assetId){
+  let d=0;
+  if(t.type==='income'){ if(t.acct==='asset:'+assetId) d+=t.amt; }
+  else if(t.type==='expense'){
+    if(t.acct==='asset:'+assetId) d-=t.amt;
+    else if(t.acct&&t.acct.startsWith('card:')){
+      const c=cardById(t.acct.slice(5));
+      if(c && !isCredit(c) && c.assetId===assetId) d-=t.amt; // check card hits asset
+      // credit card: no asset effect at purchase time
+    }
+  }else if(t.type==='transfer'){
+    if(t.from==='asset:'+assetId) d-=t.amt;
+    if(t.to==='asset:'+assetId) d+=t.amt;
+  }else if(t.type==='cardpay'){
+    if(t.from==='asset:'+assetId) d-=t.amt; // paying asset decreases
+  }
+  return d;
 }
-// current balance of an asset = opening +incomes -expenses routed to it
+// effect of a single tx on a given liability id (signed; positive = more debt)
+function txLiabDelta(t,liabId){
+  let d=0;
+  if(t.type==='expense' && t.acct && t.acct.startsWith('card:')){
+    const c=cardById(t.acct.slice(5));
+    if(isCredit(c) && c.liabId===liabId) d+=t.amt; // credit purchase adds debt
+  }else if(t.type==='transfer'){
+    if(t.from==='liab:'+liabId) d-=t.amt; // pulling from a liability reduces it (rare)
+    if(t.to==='liab:'+liabId) d+=t.amt;
+  }else if(t.type==='cardpay'){
+    // to may be 'card:<id>' (resolve to its liab) or 'liab:<id>'
+    let tgt=null;
+    if(t.to&&t.to.startsWith('liab:')) tgt=t.to.slice(5);
+    else if(t.to&&t.to.startsWith('card:')){ const c=cardById(t.to.slice(5)); tgt=c?cardLiabId(c):null; }
+    if(tgt===liabId) d-=t.amt; // payment reduces debt
+  }
+  return d;
+}
 function assetBalance(id){
   const a=assetById(id); if(!a) return 0;
   let bal=a.opening||0;
-  state.tx.forEach(t=>{
-    const aid=acctToAssetId(t.acct);
-    if(aid!==id) return;
-    bal += t.type==='income'? t.amt : -t.amt;
-  });
+  state.tx.forEach(t=>{ bal+=txAssetDelta(t,id); });
   return bal;
 }
-// options for the 출처/입금 select, given type
+function liabBalance(id){
+  const l=liabById(id); if(!l) return 0;
+  let bal=l.opening||0;
+  state.tx.forEach(t=>{ bal+=txLiabDelta(t,id); });
+  return bal;
+}
+
+// options for income/expense 출처 select
 function acctOptions(forType){
-  // assets first, then cards (cards only make sense for expense, but allow both)
   let html='<option value="">— 미지정 —</option>';
   html+='<optgroup label="자산">'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('')+'</optgroup>';
   if(state.cards.length && forType==='expense'){
-    html+='<optgroup label="카드">'+state.cards.map(c=>{const a=assetById(c.assetId);return `<option value="card:${c.id}">${esc(c.name)}${a?` (${esc(a.name)})`:''}</option>`;}).join('')+'</optgroup>';
+    html+='<optgroup label="카드">'+state.cards.map(c=>{
+      const tag = isCredit(c)?'신용':'체크';
+      const link = isCredit(c)? (liabById(c.liabId)?.name||'') : (assetById(c.assetId)?.name||'');
+      return `<option value="card:${c.id}">${esc(c.name)} [${tag}]${link?` (${esc(link)})`:''}</option>`;
+    }).join('')+'</optgroup>';
   }
   return html;
 }
-// short display label for a tx.acct value
+// options listing assets (and optionally liabilities) for transfer/cardpay endpoints
+function endpointOptions(opts){
+  // opts: {assets:true, liabs:true, cards:false, placeholder:'...'}
+  let html=`<option value="">${opts.placeholder||'— 선택 —'}</option>`;
+  if(opts.assets) html+='<optgroup label="자산">'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('')+'</optgroup>';
+  if(opts.cards && state.cards.filter(isCredit).length) html+='<optgroup label="신용카드">'+state.cards.filter(isCredit).map(c=>`<option value="card:${c.id}">${esc(c.name)}</option>`).join('')+'</optgroup>';
+  if(opts.liabs && (state.liabilities||[]).length) html+='<optgroup label="부채">'+state.liabilities.map(l=>`<option value="liab:${l.id}">${esc(l.name)}</option>`).join('')+'</optgroup>';
+  return html;
+}
+// short display label for an endpoint string (asset:/liab:/card:)
+function endpointLabel(s){
+  if(!s) return '';
+  if(s.startsWith('asset:')) return esc(assetById(s.slice(6))?.name||'');
+  if(s.startsWith('liab:')) return esc(liabById(s.slice(5))?.name||'');
+  if(s.startsWith('card:')) return esc(cardById(s.slice(5))?.name||'');
+  return '';
+}
+// label for income/expense tx.acct
 function acctLabel(acct){
   if(!acct) return '';
   if(acct.startsWith('asset:')){ const a=assetById(acct.slice(6)); return a?esc(a.name):''; }
-  if(acct.startsWith('card:')){ const c=cardById(acct.slice(5)); if(!c)return ''; const a=assetById(c.assetId); return esc(c.name)+(a?` › ${esc(a.name)}`:''); }
+  if(acct.startsWith('card:')){ const c=cardById(acct.slice(5)); if(!c)return '';
+    if(isCredit(c)){ const l=liabById(c.liabId); return esc(c.name)+(l?` › ${esc(l.name)}`:''); }
+    const a=assetById(c.assetId); return esc(c.name)+(a?` › ${esc(a.name)}`:''); }
   return '';
 }
 
@@ -437,10 +537,15 @@ function load(){
     // default assets: 현금, 통장
     d.assets=[{id:'a_cash',name:'현금',opening:0},{id:'a_bank',name:'통장',opening:0}];
   }
-  if(!d.cards){
-    // default a card linked to 통장
-    d.cards=[{id:'c_main',name:'카드',assetId:'a_bank'}];
+  if(!d.liabilities){
+    d.liabilities=[];
   }
+  if(!d.cards){
+    // default a check card linked to 통장
+    d.cards=[{id:'c_main',name:'카드',kind:'check',assetId:'a_bank',liabId:''}];
+  }
+  // migrate old cards (no kind) → treat as check cards
+  d.cards.forEach(c=>{ if(!c.kind){ c.kind='check'; if(!('liabId' in c)) c.liabId=''; } });
   d = migrateCats(d);
   return d;
 }
@@ -518,16 +623,50 @@ function refreshAcct(){
   $('acctLabel').textContent = (type==='expense'?'출처':'입금 자산')+' (선택)';
   const prev=$('acct').value;
   $('acct').innerHTML = acctOptions(type);
-  // keep selection if still valid
   if(prev && [...$('acct').options].some(o=>o.value===prev)) $('acct').value=prev;
 }
+// configure form layout + from/to selects for the current type
+function applyType(){
+  const isMove = type==='transfer'||type==='cardpay';
+  $('ieFields').style.display = isMove?'none':'';
+  $('moveFields').style.display = isMove?'':'none';
+  if(type==='transfer'){
+    $('fromLabel').textContent='출금 (자산)';
+    $('toLabel').textContent='입금 (자산)';
+    $('fromSel').innerHTML=endpointOptions({assets:true,placeholder:'출금 자산 선택'});
+    $('toSel').innerHTML=endpointOptions({assets:true,placeholder:'입금 자산 선택'});
+    $('memo').placeholder='예: 비상금 이체';
+  }else if(type==='cardpay'){
+    $('fromLabel').textContent='납부 출금 (통장)';
+    $('toLabel').textContent='납부 대상 (카드/부채)';
+    $('fromSel').innerHTML=endpointOptions({assets:true,placeholder:'출금 자산 선택'});
+    $('toSel').innerHTML=endpointOptions({cards:true,liabs:true,placeholder:'카드/부채 선택'});
+    $('memo').placeholder='예: 카드 대금';
+  }else{
+    fillCats();refreshPayeeList();
+    $('memo').placeholder='예: 점심 식사';
+  }
+}
 $('seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;type=b.dataset.t;
-  [...$('seg').children].forEach(x=>x.className='');b.className='on '+(type==='expense'?'exp':'inc');fillCats();refreshPayeeList();};
+  [...$('seg').children].forEach(x=>x.className='');
+  const cls = type==='expense'?'exp':type==='income'?'inc':'mov';
+  b.className='on '+cls;
+  applyType();};
 $('add').onclick=()=>{
   const amt=parseFloat($('amt').value);
   if(!amt||amt<=0){$('amt').focus();return;}
-  state.tx.push({id:Date.now(),type,amt,cat:$('cat').value,sub:$('sub').value||'',sub2:$('sub2').value||'',payee:$('payee').value.trim(),acct:$('acct').value||'',memo:$('memo').value.trim(),date:$('date').value});
-  save();$('amt').value='';$('payee').value='';$('memo').value='';refreshPayeeList();render();
+  if(type==='transfer'||type==='cardpay'){
+    const from=$('fromSel').value, to=$('toSel').value;
+    if(!from){alert('출금 계정을 선택하세요.');return;}
+    if(!to){alert(type==='cardpay'?'납부 대상(카드/부채)을 선택하세요.':'입금 계정을 선택하세요.');return;}
+    if(from===to){alert('출금과 입금이 같습니다.');return;}
+    state.tx.push({id:Date.now(),type,amt,from,to,memo:$('memo').value.trim(),date:$('date').value});
+  }else{
+    state.tx.push({id:Date.now(),type,amt,cat:$('cat').value,sub:$('sub').value||'',sub2:$('sub2').value||'',payee:$('payee').value.trim(),acct:$('acct').value||'',memo:$('memo').value.trim(),date:$('date').value});
+  }
+  save();$('amt').value='';$('payee').value='';$('memo').value='';
+  if(type!=='transfer'&&type!=='cardpay') refreshPayeeList();
+  render();
 };
 
 /* ---------- month nav ---------- */
@@ -723,7 +862,7 @@ $('budSave').onclick=()=>{const v=parseFloat($('budAmt').value);if(!v||v<=0){$('
 /* ---------- 거래처별 집계 toggle ---------- */
 $('payeeStatToggle').onclick=()=>{ payeeStatType = payeeStatType==='expense'?'income':'expense'; renderPayeeStat(); };
 
-/* ---------- assets & cards ---------- */
+/* ---------- assets, liabilities & cards ---------- */
 $('assetAdd').onclick=()=>{
   const name=$('newAsset').value.trim();
   const bal=parseFloat($('newAssetBal').value)||0;
@@ -732,45 +871,72 @@ $('assetAdd').onclick=()=>{
   state.assets.push({id:uid('a'),name,opening:bal});
   save();$('newAsset').value='';$('newAssetBal').value='';render();refreshAcct();
 };
+$('liabAdd').onclick=()=>{
+  const name=$('newLiab').value.trim();
+  const bal=parseFloat($('newLiabBal').value)||0;
+  if(!name){$('newLiab').focus();return;}
+  if(state.liabilities.some(l=>l.name===name)){alert('이미 있는 부채 이름입니다.');return;}
+  state.liabilities.push({id:uid('l'),name,opening:bal});
+  save();$('newLiab').value='';$('newLiabBal').value='';render();refreshAcct();
+};
+// card kind toggles which link select (asset for check, liability for credit)
+$('newCardKind').onchange=refreshCardLinkSelect;
+function refreshCardLinkSelect(){
+  const kind=$('newCardKind').value;
+  if(kind==='check'){
+    $('newCardLink').innerHTML='<option value="">차감 통장 선택</option>'+state.assets.map(a=>`<option value="asset:${a.id}">${esc(a.name)}</option>`).join('');
+  }else{
+    // credit: link to an existing liability, or auto-create one
+    $('newCardLink').innerHTML='<option value="">자동 생성(카드명 부채)</option>'+state.liabilities.map(l=>`<option value="liab:${l.id}">${esc(l.name)} (기존 부채)</option>`).join('');
+  }
+}
 $('cardAdd').onclick=()=>{
   const name=$('newCard').value.trim();
-  const assetId=$('newCardAsset').value;
+  const kind=$('newCardKind').value;
+  const link=$('newCardLink').value;
   if(!name){$('newCard').focus();return;}
-  if(!assetId){alert('카드와 연결할 자산을 선택하세요.');return;}
   if(state.cards.some(c=>c.name===name)){alert('이미 있는 카드 이름입니다.');return;}
-  state.cards.push({id:uid('c'),name,assetId});
-  save();$('newCard').value='';render();refreshAcct();
+  if(kind==='check'){
+    if(!link||!link.startsWith('asset:')){alert('체크카드는 차감할 통장(자산)을 선택하세요.');return;}
+    state.cards.push({id:uid('c'),name,kind:'check',assetId:link.slice(6),liabId:''});
+  }else{
+    let liabId;
+    if(link&&link.startsWith('liab:')){ liabId=link.slice(5); }
+    else { // auto-create a liability named after the card
+      const l={id:uid('l'),name,opening:0}; state.liabilities.push(l); liabId=l.id;
+    }
+    state.cards.push({id:uid('c'),name,kind:'credit',assetId:'',liabId});
+  }
+  save();$('newCard').value='';render();refreshAcct();refreshCardLinkSelect();
 };
 
-/* delegated clicks for asset/card rows */
+/* delegated clicks for asset/liability/card rows */
 document.body.addEventListener('click',e=>{
-  // edit balance (opening adjust so that displayed balance becomes the typed value)
-  const ab=e.target.closest('.asset-editbtn');
-  if(ab){ assetStartEdit(ab.dataset.id); return; }
-  const asv=e.target.closest('.asset-savebtn');
-  if(asv){ assetSaveEdit(asv.dataset.id); return; }
-  const acn=e.target.closest('.asset-cancelbtn');
-  if(acn){ render(); return; }
-  const arn=e.target.closest('.asset-renamebtn');
-  if(arn){ assetRename(arn.dataset.id); return; }
-  const adl=e.target.closest('.asset-delbtn');
-  if(adl){ assetDelete(adl.dataset.id); return; }
-  const cdl=e.target.closest('.card-delbtn');
-  if(cdl){ cardDelete(cdl.dataset.id); return; }
+  const ab=e.target.closest('.asset-editbtn'); if(ab){ acctStartEdit('asset',ab.dataset.id); return; }
+  const asv=e.target.closest('.asset-savebtn'); if(asv){ acctSaveEdit('asset',asv.dataset.id); return; }
+  const lb=e.target.closest('.liab-editbtn'); if(lb){ acctStartEdit('liab',lb.dataset.id); return; }
+  const lsv=e.target.closest('.liab-savebtn'); if(lsv){ acctSaveEdit('liab',lsv.dataset.id); return; }
+  const acn=e.target.closest('.acct-cancelbtn'); if(acn){ editingAsset=null;editingLiab=null;render(); return; }
+  const arn=e.target.closest('.asset-renamebtn'); if(arn){ assetRename(arn.dataset.id); return; }
+  const adl=e.target.closest('.asset-delbtn'); if(adl){ assetDelete(adl.dataset.id); return; }
+  const lrn=e.target.closest('.liab-renamebtn'); if(lrn){ liabRename(lrn.dataset.id); return; }
+  const ldl=e.target.closest('.liab-delbtn'); if(ldl){ liabDelete(ldl.dataset.id); return; }
+  const cdl=e.target.closest('.card-delbtn'); if(cdl){ cardDelete(cdl.dataset.id); return; }
 });
 
-function assetStartEdit(id){ editingAsset=id; renderAssets(); 
-  const inp=document.querySelector(`.asset-balinput[data-id="${id}"]`); if(inp){inp.focus();inp.select();} }
-function assetSaveEdit(id){
-  const inp=document.querySelector(`.asset-balinput[data-id="${id}"]`);
+function acctStartEdit(kind,id){ if(kind==='asset'){editingAsset=id;editingLiab=null;} else {editingLiab=id;editingAsset=null;} renderAssets();
+  const inp=document.querySelector(`.${kind}-balinput[data-id="${id}"]`); if(inp){inp.focus();inp.select();} }
+function acctSaveEdit(kind,id){
+  const inp=document.querySelector(`.${kind}-balinput[data-id="${id}"]`);
   if(!inp) return;
   const target=parseFloat(inp.value);
   if(isNaN(target)){alert('숫자를 입력하세요.');return;}
-  const a=assetById(id);
-  // adjust opening so that current computed balance equals the typed target
-  const movements=assetBalance(id)-(a.opening||0); // = incomes - expenses routed here
-  a.opening = target - movements;
-  editingAsset=null;
+  if(kind==='asset'){
+    const a=assetById(id); const movements=assetBalance(id)-(a.opening||0); a.opening=target-movements;
+  }else{
+    const l=liabById(id); const movements=liabBalance(id)-(l.opening||0); l.opening=target-movements;
+  }
+  editingAsset=null;editingLiab=null;
   save();render();
 }
 function assetRename(id){
@@ -780,19 +946,36 @@ function assetRename(id){
   if(state.assets.some(x=>x.name===nn)){alert('이미 있는 이름입니다.');return;}
   a.name=nn;save();render();refreshAcct();
 }
+function liabRename(id){
+  const l=liabById(id);
+  const nn=(prompt(`'${l.name}' 부채의 새 이름`,l.name)||'').trim();
+  if(!nn||nn===l.name)return;
+  if(state.liabilities.some(x=>x.name===nn)){alert('이미 있는 이름입니다.');return;}
+  l.name=nn;save();render();refreshAcct();
+}
+function liabDelete(id){
+  const used=state.tx.filter(t=>txLiabDelta(t,id)!==0 || t.from==='liab:'+id || t.to==='liab:'+id).length;
+  const cardLinked=state.cards.filter(c=>isCredit(c)&&c.liabId===id).length;
+  if(used>0){alert('이 부채에 연결된 거래가 '+used+'건 있어 삭제할 수 없습니다.');return;}
+  if(cardLinked>0){alert('이 부채에 연결된 신용카드가 있습니다. 카드를 먼저 삭제하세요.');return;}
+  const l=liabById(id);
+  if(!confirm(`'${l.name}' 부채를 삭제할까요?`))return;
+  state.liabilities=state.liabilities.filter(x=>x.id!==id);save();render();refreshAcct();
+}
 function assetDelete(id){
-  // block if any tx routes to it (directly or via a card), or any card links to it
-  const used=state.tx.filter(t=>acctToAssetId(t.acct)===id).length;
-  const cardLinked=state.cards.filter(c=>c.assetId===id).length;
-  if(used>0){alert('이 자산에 연결된 거래가 '+used+'건 있어 삭제할 수 없습니다.\n해당 거래의 출처를 바꾸거나 삭제한 뒤 다시 시도하세요.');return;}
-  if(cardLinked>0){alert('이 자산에 연결된 카드가 있습니다. 카드를 먼저 삭제하거나 다른 자산에 연결하세요.');return;}
+  // block if any tx touches this asset (income/expense/transfer/cardpay) or a check card links to it
+  const used=state.tx.filter(t=>txAssetDelta(t,id)!==0
+      || t.from==='asset:'+id || t.to==='asset:'+id).length;
+  const cardLinked=state.cards.filter(c=>!isCredit(c)&&c.assetId===id).length;
+  if(used>0){alert('이 자산에 연결된 거래가 '+used+'건 있어 삭제할 수 없습니다.\n해당 거래를 바꾸거나 삭제한 뒤 다시 시도하세요.');return;}
+  if(cardLinked>0){alert('이 자산에 연결된 체크카드가 있습니다. 카드를 먼저 삭제하거나 다른 자산에 연결하세요.');return;}
   if(state.assets.length<=1){alert('자산은 최소 1개 있어야 합니다.');return;}
   const a=assetById(id);
   if(!confirm(`'${a.name}' 자산을 삭제할까요?`))return;
   state.assets=state.assets.filter(x=>x.id!==id);save();render();refreshAcct();
 }
 function cardDelete(id){
-  const used=state.tx.filter(t=>t.acct===('card:'+id)).length;
+  const used=state.tx.filter(t=>t.acct===('card:'+id)||t.to===('card:'+id)).length;
   if(used>0){alert('이 카드로 기록된 거래가 '+used+'건 있어 삭제할 수 없습니다.');return;}
   const c=cardById(id);
   if(!confirm(`'${c.name}' 카드를 삭제할까요?`))return;
@@ -867,6 +1050,16 @@ function render(){
   $('sumInc').textContent=won(inc);$('sumExp').textContent=won(exp);$('sumBal').textContent=won(inc-exp);
 
   $('txlist').innerHTML=rows.length?rows.map(t=>{
+    if(t.type==='transfer'||t.type==='cardpay'){
+      const isPay=t.type==='cardpay';
+      const fromL=endpointLabel(t.from), toL=endpointLabel(t.to);
+      const tag=isPay?'카드대금':'이체';
+      return `<div class="tx"><span class="dot mov"></span>
+        <div class="meta"><div class="cat"><span class="badge" style="background:var(--ink);color:#fff">${tag}</span> ${esc(fromL)} → ${esc(toL)}${t.memo?` <span style="font-weight:400;color:var(--muted)">· ${esc(t.memo)}</span>`:''}</div>
+        <div class="sub">${t.date}</div></div>
+        <div class="val" style="color:var(--muted)">${won(t.amt)}</div>
+        <button class="del" data-id="${t.id}">✕</button></div>`;
+    }
     const c=t.type==='income'?'var(--teal)':'var(--coral)';
     const sign=t.type==='income'?'+':'−';
     const rec=t.recurId?'<span class="badge">반복</span>':'';
@@ -925,22 +1118,23 @@ function render(){
   refreshPayeeList();
 }
 
-/* render assets + cards management */
+/* render assets + liabilities + cards management */
 function renderAssets(){
+  // ASSETS
   const total=state.assets.reduce((s,a)=>s+assetBalance(a.id),0);
   $('assetTotal').textContent='총 '+won(total);
   $('assetlist').innerHTML = `<div class="assethead"><span>자산</span><span>잔액</span></div>` +
     state.assets.map(a=>{
       const bal=assetBalance(a.id);
       const editing = editingAsset===a.id;
-      const linkedCards=state.cards.filter(c=>c.assetId===a.id).map(c=>c.name);
-      const sub = linkedCards.length?`<div class="sub2">연결 카드: ${linkedCards.map(esc).join(', ')}</div>`:'';
+      const linkedCards=state.cards.filter(c=>!isCredit(c)&&c.assetId===a.id).map(c=>c.name);
+      const sub = linkedCards.length?`<div class="sub2">연결 체크카드: ${linkedCards.map(esc).join(', ')}</div>`:'';
       if(editing){
         return `<div class="asrow">
           <div style="flex:1"><span class="anm">${esc(a.name)}</span>${sub}</div>
           <div class="aedit"><input class="asset-balinput" data-id="${a.id}" type="number" inputmode="numeric" value="${bal}"></div>
           <div class="acts"><button class="save asset-savebtn" data-id="${a.id}">저장</button>
-            <button class="asset-cancelbtn">취소</button></div>
+            <button class="acct-cancelbtn">취소</button></div>
         </div>`;
       }
       return `<div class="asrow">
@@ -954,12 +1148,45 @@ function renderAssets(){
       </div>`;
     }).join('');
 
-  // card section
-  $('newCardAsset').innerHTML = '<option value="">연결 자산 선택</option>'+state.assets.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  // LIABILITIES
+  const liabs=state.liabilities||[];
+  const ltotal=liabs.reduce((s,l)=>s+liabBalance(l.id),0);
+  $('liabTotal').textContent = liabs.length? '총 '+won(ltotal) : '';
+  $('liablist').innerHTML = liabs.length ? (`<div class="assethead"><span>부채</span><span>잔액</span></div>` +
+    liabs.map(l=>{
+      const bal=liabBalance(l.id);
+      const editing = editingLiab===l.id;
+      const card=state.cards.find(c=>isCredit(c)&&c.liabId===l.id);
+      const sub = card?`<div class="sub2">신용카드: ${esc(card.name)}</div>`:'';
+      if(editing){
+        return `<div class="asrow">
+          <div style="flex:1"><span class="anm">${esc(l.name)}</span>${sub}</div>
+          <div class="aedit"><input class="liab-balinput" data-id="${l.id}" type="number" inputmode="numeric" value="${bal}"></div>
+          <div class="acts"><button class="save liab-savebtn" data-id="${l.id}">저장</button>
+            <button class="acct-cancelbtn">취소</button></div>
+        </div>`;
+      }
+      return `<div class="asrow">
+        <div style="flex:1"><span class="anm">${esc(l.name)}</span>${sub}</div>
+        <div class="abal" style="color:var(--coral)">${won(bal)}</div>
+        <div class="acts">
+          <button class="liab-editbtn" data-id="${l.id}">잔액수정</button>
+          <button class="liab-renamebtn" data-id="${l.id}">이름</button>
+          <button class="danger liab-delbtn" data-id="${l.id}">삭제</button>
+        </div>
+      </div>`;
+    }).join('')) : '<div class="empty" style="padding:14px 0">등록된 부채가 없습니다.</div>';
+
+  // CARDS
+  refreshCardLinkSelect();
   $('cardlist').innerHTML = state.cards.length? state.cards.map(c=>{
-    const a=assetById(c.assetId);
+    const credit=isCredit(c);
+    const linkName = credit? (liabById(c.liabId)?.name||'(삭제된 부채)') : (assetById(c.assetId)?.name||'(삭제된 자산)');
+    const tag = credit?'신용':'체크';
+    const desc = credit? `누적 부채: ${esc(linkName)}` : `차감 통장: ${esc(linkName)}`;
+    const bal = credit? ` · 미결제 ${won(liabBalance(c.liabId))}` : '';
     return `<div class="asrow">
-      <div style="flex:1"><span class="anm">${esc(c.name)}</span><div class="sub2">차감 자산: ${a?esc(a.name):'(삭제된 자산)'}</div></div>
+      <div style="flex:1"><span class="anm">${esc(c.name)} <span class="badge" style="background:${credit?'var(--coral-soft)':'var(--teal-soft)'};color:${credit?'var(--coral)':'var(--teal)'}">${tag}</span></span><div class="sub2">${desc}${bal}</div></div>
       <div class="acts"><button class="danger card-delbtn" data-id="${c.id}">삭제</button></div>
     </div>`;
   }).join('') : '<div class="empty" style="padding:16px 0">등록된 카드가 없습니다.</div>';
@@ -1161,7 +1388,9 @@ function ensureShape(){
   if(!state.recur)state.recur=[];if(!state.recurLog)state.recurLog={};
   if(!state.budgets)state.budgets={};if(!state.tx)state.tx=[];
   if(!state.assets)state.assets=[{id:'a_cash',name:'현금',opening:0},{id:'a_bank',name:'통장',opening:0}];
+  if(!state.liabilities)state.liabilities=[];
   if(!state.cards)state.cards=[];
+  state.cards.forEach(c=>{ if(!c.kind){c.kind='check'; if(!('liabId'in c))c.liabId='';} });
   state=migrateCats(state); // normalize categories to 대/중/소 tree
 }
 function save_local(){ localStorage.setItem('budgetData',JSON.stringify(state)); }
@@ -1206,6 +1435,8 @@ $('date').value=new Date().toISOString().slice(0,10);
 fillCats();
 fillRCats();
 refreshPayeeList();
+applyType();
+refreshCardLinkSelect();
 render();
 checkRecur();
 restoreDrive();
