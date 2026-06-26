@@ -60,6 +60,9 @@
   .seg.seg-sm button.on{background:var(--ink);color:#fff}
   #chartCat button.on.exp{background:var(--coral);color:#fff}
   #chartCat button.on.inc{background:var(--teal);color:#fff}
+  #listFilter button.on.exp{background:var(--coral);color:#fff}
+  #listFilter button.on.inc{background:var(--teal);color:#fff}
+  #listFilter button.on.mov{background:var(--ink);color:#fff}
   .chartctl{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
   .chartctl .seg{flex:1;min-width:180px}
   .periodnav{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:16px}
@@ -307,7 +310,12 @@
       </div>
 
       <div class="panel" id="tab-list">
-        <h2>이번 달 내역</h2>
+        <div class="seg seg-sm" id="listFilter" style="margin-bottom:12px">
+          <button class="on" data-lf="all">전체</button>
+          <button data-lf="expense">지출</button>
+          <button data-lf="income">수입</button>
+          <button data-lf="move">이체</button>
+        </div>
         <div id="txlist"></div>
       </div>
 
@@ -506,6 +514,7 @@ const defTree=(arr)=>arr.map(node);
 let state = load();
 let cur = new Date(); cur.setDate(1);
 let listPeriod='month';      // day|week|month|year — granularity of the 내역 list
+let listFilter='all';        // all|expense|income|move — type filter of the 내역 list
 let listRef = new Date();    // reference date for the list period window
 let type='expense', tab='list', rType='expense', cType='expense';
 let treeOpen={}; // (legacy, unused)
@@ -826,6 +835,13 @@ $('prev').onclick=()=>{shiftListPeriod(-1);render();checkRecur();};
 $('next').onclick=()=>{shiftListPeriod(1);render();checkRecur();};
 $('listPeriod').onclick=e=>{const b=e.target.closest('button');if(!b)return;listPeriod=b.dataset.pd;
   [...$('listPeriod').children].forEach(x=>x.classList.toggle('on',x===b));render();};
+$('listFilter').onclick=e=>{const b=e.target.closest('button');if(!b)return;listFilter=b.dataset.lf;
+  [...$('listFilter').children].forEach(x=>{x.classList.remove('on','exp','inc','mov');});
+  b.classList.add('on');
+  if(listFilter==='expense') b.classList.add('exp');
+  else if(listFilter==='income') b.classList.add('inc');
+  else if(listFilter==='move') b.classList.add('mov');
+  render();};
 
 /* ---------- tabs ---------- */
 document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;
@@ -1394,6 +1410,12 @@ function render(){
   const exp=rows.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
   $('sumInc').textContent=won(inc);$('sumExp').textContent=won(exp);$('sumBal').textContent=won(inc-exp);
 
+  // apply the type filter to the *list* only (summary cards stay on full totals)
+  const matchFilter = t => listFilter==='all' ? true
+    : listFilter==='move' ? (t.type==='transfer'||t.type==='cardpay')
+    : t.type===listFilter;
+  const viewRows=rows.filter(matchFilter);
+
   // render a single tx row
   const renderTx = t => {
     if(t.type==='transfer'||t.type==='cardpay'){
@@ -1419,23 +1441,29 @@ function render(){
       <button class="del" data-id="${t.id}">✕</button></div>`;
   };
 
-  if(!rows.length){
-    $('txlist').innerHTML='<div class="empty">이 기간에 내역이 없습니다.<br>왼쪽에서 첫 기록을 추가해 보세요.</div>';
+  if(!viewRows.length){
+    const fname={all:'',expense:'지출 ',income:'수입 ',move:'이체 '}[listFilter];
+    $('txlist').innerHTML=`<div class="empty">이 기간에 ${fname}내역이 없습니다.${listFilter==='all'?'<br>왼쪽에서 첫 기록을 추가해 보세요.':''}</div>`;
   } else if(listPeriod==='day'){
     // single day → flat list, no date headers
-    $('txlist').innerHTML=rows.map(renderTx).join('');
+    $('txlist').innerHTML=viewRows.map(renderTx).join('');
   } else {
     // group by date with a per-day header showing that day's 수입/지출 net
     const byDate={};
-    rows.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
+    viewRows.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
     const dates=Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
     $('txlist').innerHTML=dates.map(dt=>{
       const list=byDate[dt];
       const di=list.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
       const de=list.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+      const dm=list.filter(t=>t.type==='transfer'||t.type==='cardpay').reduce((s,t)=>s+t.amt,0);
       const d=new Date(dt+'T00:00:00');
       const wk=['일','월','화','수','목','금','토'][d.getDay()];
-      const sumTxt=[di?`<span style="color:var(--teal)">+${won(di)}</span>`:'',de?`<span style="color:var(--coral)">−${won(de)}</span>`:''].filter(Boolean).join(' ');
+      const parts=[];
+      if(di) parts.push(`<span style="color:var(--teal)">+${won(di)}</span>`);
+      if(de) parts.push(`<span style="color:var(--coral)">−${won(de)}</span>`);
+      if(dm && listFilter==='move') parts.push(`<span style="color:var(--muted)">${won(dm)}</span>`);
+      const sumTxt=parts.join(' ');
       return `<div class="daygroup">
         <div class="dayhead"><span class="dayname">${d.getMonth()+1}월 ${d.getDate()}일 (${wk})</span><span class="daysum">${sumTxt}</span></div>
         ${list.map(renderTx).join('')}
