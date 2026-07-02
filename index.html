@@ -1444,6 +1444,7 @@ function cardEditLink(id){
 */
 function checkRecur(){
   const y=cur.getFullYear(), m=cur.getMonth();
+  const today=todayStr(); // YYYY-MM-DD of the real current date
   let changed=false;
   const asks=[];
   state.recur.forEach(r=>{
@@ -1454,6 +1455,9 @@ function checkRecur(){
     // don't run occurrences dated before the item was registered (no back-dating
     // within the registration month). Mark them done so we don't keep asking.
     if(r.createdAt && date < r.createdAt){ state.recurLog[key]='done'; changed=true; return; }
+    // don't run before the scheduled date has actually arrived. Leave it UNLOGGED
+    // so it executes once the 기일 comes around (e.g. viewing this month early, or a future month).
+    if(date > today) return;
     if(r.mode==='fixed'){
       state.tx.push({id:Date.now()+Math.random(),type:r.type,amt:r.amt,cat:r.cat,sub:r.sub||'',sub2:r.sub2||'',payee:r.payee||'',acct:r.acct||'',memo:r.memo,date,recurId:r.id});
       state.recurLog[key]='done';changed=true;
